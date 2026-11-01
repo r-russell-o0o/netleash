@@ -56,7 +56,7 @@ try {
     # --- files -----------------------------------------------------------------------
     Step "Copying files to $InstallDir"
     New-Item -ItemType Directory -Force $InstallDir | Out-Null
-    foreach ($f in 'netleash.exe', 'uninstall.ps1', 'README.txt', 'VERSION') {
+    foreach ($f in 'netleash.exe', 'netleash.ico', 'uninstall.ps1', 'README.txt', 'VERSION') {
         $p = Join-Path $src $f
         if (Test-Path $p) { Copy-Item $p $InstallDir -Force }
     }
@@ -170,8 +170,9 @@ not change Defender settings for you.
 
     # --- desktop + Start menu shortcuts, Installed apps ---------------------------------
     # Links to the UI in the default browser, for every user of this PC. The
-    # icon is Windows' own network icon (netleash.exe has none).
-    $link = "[InternetShortcut]`r`nURL=http://127.0.0.1:$Port/`r`nIconFile=$env:SystemRoot\System32\netshell.dll`r`nIconIndex=0`r`n"
+    # icon is netleash.ico (the exe itself carries no icon resource).
+    $ico = Join-Path $InstallDir 'netleash.ico'
+    $link = "[InternetShortcut]`r`nURL=http://127.0.0.1:$Port/`r`nIconFile=$ico`r`nIconIndex=0`r`n"
     foreach ($dir in (Join-Path $env:PUBLIC 'Desktop'), (Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs')) {
         Set-Content (Join-Path $dir 'NetLeash.url') $link
     }
@@ -179,7 +180,7 @@ not change Defender settings for you.
     New-Item -Force $uninstKey | Out-Null
     $uninstall = "powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$InstallDir\uninstall.ps1`""
     @{ DisplayName = 'NetLeash'; DisplayVersion = "$version"; Publisher = 'NetLeash';
-       InstallLocation = $InstallDir; DisplayIcon = $exe; UninstallString = $uninstall; NoModify = 1; NoRepair = 1
+       InstallLocation = $InstallDir; DisplayIcon = $ico; UninstallString = $uninstall; NoModify = 1; NoRepair = 1
     }.GetEnumerator() | ForEach-Object {
         $type = if ($_.Value -is [int]) { 'DWord' } else { 'String' }
         New-ItemProperty -Path $uninstKey -Name $_.Key -Value $_.Value -PropertyType $type -Force | Out-Null
