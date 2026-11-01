@@ -1,0 +1,5 @@
+# No MSVC Build Tools on this machine: Rust's GNU toolchain links with its own bundled MinGW.
+[toolchain]
+channel = "stable-x86_64-pc-windows-gnu"
+components = ["clippy", "rustfmt"]
+

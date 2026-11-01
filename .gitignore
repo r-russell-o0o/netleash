@@ -1,0 +1,4 @@
+/target
+/demo-data
+# Third-party binaries: fetch with fetch-windivert.ps1 (hash-checked)
+/vendor

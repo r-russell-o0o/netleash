@@ -1,0 +1,541 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NetLeash</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #ffffff; --text: #1b1f24; --muted: #667080; --line: #e3e6ea;
+    --down: #2f7de1; --up: #e0832f; --bad: #d23b3b; --ok: #2e9b5f; --warn: #b8860b;
+    --chip: #eef1f4; --hover: #f1f4f8; --input: #ffffff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #121418; --panel: #1a1d22; --text: #e4e7eb; --muted: #8b93a0; --line: #2a2f36;
+      --down: #5a9cf0; --up: #f0a35a; --bad: #ef6464; --ok: #4cc283; --warn: #e0b84a;
+      --chip: #252a31; --hover: #20242a; --input: #14171b;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 14px/1.4 "Segoe UI", system-ui, sans-serif; }
+  header { padding: 16px 20px 8px; display: flex; flex-wrap: wrap; gap: 16px; align-items: center; }
+  h1 { font-size: 18px; margin: 0; letter-spacing: .3px; }
+  h1 small { color: var(--muted); font-weight: 400; font-size: 12px; margin-left: 6px; }
+  .rates { display: flex; gap: 18px; font-variant-numeric: tabular-nums; }
+  .rate b { font-size: 20px; font-weight: 600; }
+  .rate.down b { color: var(--down); } .rate.up b { color: var(--up); }
+  .rate span { color: var(--muted); font-size: 12px; display: block; }
+  .chips { display: flex; gap: 6px; flex-wrap: wrap; margin-left: auto; }
+  .chip { background: var(--chip); border-radius: 999px; padding: 3px 10px; font-size: 12px; cursor: default; }
+  .chip i { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 6px; background: var(--muted); }
+  .chip.ok i { background: var(--ok); } .chip.bad i { background: var(--bad); } .chip.warn i { background: var(--warn); }
+  #total { display: block; width: calc(100% - 40px); height: 70px; margin: 0 20px; }
+  nav { display: flex; gap: 4px; padding: 10px 20px 0; border-bottom: 1px solid var(--line); }
+  nav button { background: none; border: 0; color: var(--muted); padding: 8px 12px; font: inherit; cursor: pointer;
+               border-bottom: 2px solid transparent; }
+  nav button.on { color: var(--text); border-bottom-color: var(--down); }
+  main { padding: 12px 20px 40px; }
+  .toolbar { display: flex; gap: 10px; align-items: center; margin-bottom: 10px; flex-wrap: wrap; }
+  input[type=search], input[type=number], select {
+    background: var(--input); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; font: inherit; }
+  input[type=search] { width: 260px; max-width: 100%; }
+  .wrap { overflow-x: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
+  table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+  th, td { padding: 7px 10px; text-align: left; white-space: nowrap; border-bottom: 1px solid var(--line); }
+  th { font-size: 12px; color: var(--muted); font-weight: 600; position: sticky; top: 0; background: var(--panel); }
+  td.num, th.num { text-align: right; }
+  tr.app { cursor: pointer; } tr.app:hover { background: var(--hover); }
+  tr.app.blocked td.name { text-decoration: line-through; color: var(--muted); }
+  td.name b { display: block; } td.name small { color: var(--muted); display: block; max-width: 380px; overflow: hidden; text-overflow: ellipsis; }
+  .down { color: var(--down); } .up { color: var(--up); }
+  canvas.spark { width: 120px; height: 26px; display: block; }
+  .rule { display: flex; gap: 6px; align-items: center; }
+  .rule input[type=number] { width: 86px; }
+  .rule label { font-size: 12px; color: var(--muted); display: flex; gap: 4px; align-items: center; }
+  .rule input:disabled { opacity: .45; }
+  button.block { border: 1px solid var(--line); background: var(--chip); color: var(--text); border-radius: 6px;
+                 padding: 4px 10px; font: inherit; cursor: pointer; min-width: 70px; }
+  button.block.on { background: var(--bad); border-color: var(--bad); color: #fff; }
+  select.block { min-width: 132px; }
+  select.block.on { background: var(--bad); border-color: var(--bad); color: #fff; }
+  select.block.part { border-color: var(--bad); color: var(--bad); }
+  th.sort { cursor: pointer; user-select: none; } th.sort:hover { color: var(--text); }
+  th.sort.on { color: var(--text); }
+  tr.app.idle td:not(:last-child) { opacity: .55; }
+  .tag { font-size: 11px; color: var(--muted); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; margin-left: 6px; font-weight: 400; }
+  button.act { border: 1px solid var(--line); background: var(--chip); color: var(--text); border-radius: 6px; padding: 5px 10px; font: inherit; cursor: pointer; }
+  button.act.primary { background: var(--down); border-color: var(--down); color: #fff; }
+  button.act:disabled { opacity: .5; cursor: default; }
+  .addform { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; background: var(--panel); border: 1px solid var(--line);
+             border-radius: 8px; padding: 10px; margin-bottom: 10px; }
+  .addform input[type=text] { flex: 1 1 360px; background: var(--input); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; font: inherit; }
+  dialog { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 10px; padding: 0;
+           width: min(900px, calc(100vw - 32px)); max-height: calc(100vh - 64px); }
+  dialog::backdrop { background: rgba(0,0,0,.45); }
+  dialog .body { padding: 16px 18px; overflow: auto; max-height: calc(100vh - 160px); }
+  dialog .foot { display: flex; gap: 8px; justify-content: flex-end; padding: 12px 18px; border-top: 1px solid var(--line); }
+  dialog h2 { font-size: 16px; margin: 0 0 10px; }
+  dialog h3 { font-size: 13px; margin: 16px 0 6px; }
+  dialog table td, dialog table th { padding: 4px 8px; font-size: 12px; }
+  dialog details { margin: 4px 0; } dialog summary { cursor: pointer; }
+  .warn { color: var(--warn); } .bad { color: var(--bad); }
+  tr.detail td { background: var(--hover); padding: 6px 10px 12px 28px; }
+  tr.detail table td, tr.detail table th { border: 0; padding: 2px 12px 2px 0; background: none; font-size: 12px; }
+  .muted { color: var(--muted); }
+  .banner { background: var(--chip); border-left: 3px solid var(--warn); padding: 8px 12px; border-radius: 4px; margin-bottom: 10px; }
+  pre.log { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px; white-space: pre-wrap; margin: 0; }
+  .hidden { display: none !important; }
+  @media (max-width: 700px) {
+    header, main { padding-left: 16px; padding-right: 16px; } #total { width: calc(100% - 32px); margin: 0 16px; }
+    .chips { margin-left: 0; } td.name small { max-width: 200px; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>NetLeash <small id="mode"></small></h1>
+  <div class="rates">
+    <div class="rate down"><b id="down">–</b><span>download</span></div>
+    <div class="rate up"><b id="up">–</b><span>upload</span></div>
+  </div>
+  <div class="chips" id="chips"></div>
+</header>
+<canvas id="total"></canvas>
+<nav>
+  <button data-tab="apps" class="on">Applications</button>
+  <button data-tab="usage">Usage history</button>
+  <button data-tab="log">Log</button>
+</nav>
+<main>
+  <section id="tab-apps">
+    <div id="demo-banner" class="banner hidden">Demo mode: traffic is synthetic (attributed to processes that really have
+      connections open), and rules are simulated. Nothing on your system is changed.</div>
+    <div class="toolbar">
+      <input type="search" id="filter" placeholder="Filter by name or path">
+      <select id="view" title="Which programs to list">
+        <option value="all">All programs</option>
+        <option value="active">Active (last minute)</option>
+        <option value="rules">With rules</option>
+      </select>
+      <span class="muted" id="count"></span>
+      <span style="flex:1"></span>
+      <button class="act" id="add-toggle">Add program…</button>
+      <button class="act" id="import-open">Import from NetLimiter…</button>
+    </div>
+    <div class="addform hidden" id="addform">
+      <input type="text" id="add-path" placeholder="Full path, e.g. C:\Program Files\App\app.exe" spellcheck="false">
+      <select id="add-fw">
+        <option value="allow">Allow</option><option value="out">Block outgoing</option>
+        <option value="in">Block incoming</option><option value="all" selected>Block all</option>
+      </select>
+      <label class="muted">↑ <input type="number" id="add-up" min="1" placeholder="no limit" style="width:86px"></label>
+      <label class="muted">↓ <input type="number" id="add-down" min="1" placeholder="no limit" style="width:86px"></label>
+      <button class="act primary" id="add-save">Add rule</button>
+      <span class="muted">Applies even while the program isn't running.</span>
+    </div>
+    <div class="wrap">
+      <table>
+        <thead><tr>
+          <th class="sort" data-sort="name">Application</th><th class="num sort" data-sort="down_rate">↓ Rate</th>
+          <th class="num sort" data-sort="up_rate">↑ Rate</th><th class="num sort" data-sort="down_total">↓ Total</th>
+          <th class="num sort" data-sort="up_total">↑ Total</th><th>Last 60 s</th><th>Firewall · limits (KB/s)</th>
+        </tr></thead>
+        <tbody id="apps"></tbody>
+      </table>
+    </div>
+    <p class="muted">Click a column title to sort. Click a row to see its connections.
+      "Block outgoing" stops connections the program makes; "Block incoming" stops connections it accepts.
+      Limits are in KB/s (1 KB = 1024 bytes).</p>
+  </section>
+  <section id="tab-usage" class="hidden">
+    <div class="toolbar"><select id="day"></select><span class="muted" id="daytotal"></span></div>
+    <div class="wrap"><table>
+      <thead><tr><th>Application</th><th class="num">↓ Downloaded</th><th class="num">↑ Uploaded</th><th class="num">Total</th></tr></thead>
+      <tbody id="usage"></tbody>
+    </table></div>
+  </section>
+  <section id="tab-log" class="hidden"><pre class="log" id="log"></pre></section>
+</main>
+<dialog id="import">
+  <div class="body">
+    <h2>Import rules from NetLimiter</h2>
+    <div class="toolbar">
+      <input type="text" id="import-path" spellcheck="false" style="flex:1; background:var(--input); color:var(--text); border:1px solid var(--line); border-radius:6px; padding:5px 8px; font:inherit">
+      <button class="act" id="import-preview">Read file</button>
+    </div>
+    <p class="muted">NetLimiter's settings file is only read. Nothing changes until you press Import.
+      Imported blocks are added to existing rules; limits you already set in NetLeash are kept.</p>
+    <div id="import-result"></div>
+  </div>
+  <div class="foot">
+    <button class="act" id="import-close">Close</button>
+    <button class="act primary" id="import-apply" disabled>Import</button>
+  </div>
+</dialog>
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+
+function fmtBytes(n) {
+  const u = ["B", "KB", "MB", "GB", "TB"];
+  let i = 0;
+  while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
+  return (i === 0 ? n.toFixed(0) : n < 10 ? n.toFixed(2) : n < 100 ? n.toFixed(1) : n.toFixed(0)) + " " + u[i];
+}
+const fmtRate = (n) => fmtBytes(n) + "/s";
+
+function el(tag, attrs = {}, ...kids) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k === "class") e.className = v; else if (k.startsWith("on")) e.addEventListener(k.slice(2), v); else e.setAttribute(k, v);
+  }
+  for (const k of kids) e.append(k);
+  return e;
+}
+
+// ---- charts -------------------------------------------------------------
+function drawHistory(canvas, hist, filled) {
+  const dpr = window.devicePixelRatio || 1;
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  if (canvas.width !== w * dpr) { canvas.width = w * dpr; canvas.height = h * dpr; }
+  const g = canvas.getContext("2d");
+  g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  g.clearRect(0, 0, w, h);
+  // Scale floor of 10 KB/s: an app trickling a few bytes should look flat, not busy.
+  const max = Math.max(10240, ...hist.map(([u, d]) => Math.max(u, d)));
+  const n = 60, step = w / (n - 1), off = n - hist.length;
+  for (const [idx, color] of [[1, css("--down")], [0, css("--up")]]) {
+    g.beginPath();
+    hist.forEach((p, i) => {
+      const x = (i + off) * step, y = h - 2 - (p[idx] / max) * (h - 4);
+      i ? g.lineTo(x, y) : g.moveTo(x, y);
+    });
+    g.strokeStyle = color; g.lineWidth = 1.5; g.stroke();
+    if (filled && hist.length) {
+      g.lineTo((hist.length - 1 + off) * step, h); g.lineTo(off * step, h); g.closePath();
+      g.globalAlpha = 0.12; g.fillStyle = color; g.fill(); g.globalAlpha = 1;
+    }
+  }
+}
+
+// ---- API ----------------------------------------------------------------
+async function api(path, body) {
+  const opt = body === undefined ? {} : {
+    method: "POST", body: JSON.stringify(body),
+    headers: { "Content-Type": "application/json", "X-NetLeash": "1" },
+  };
+  const r = await fetch(path, opt);
+  const j = await r.json();
+  if (!r.ok) throw new Error(j.error || r.statusText);
+  return j;
+}
+
+async function saveRule(app, patch) {
+  const cur = app.rule || { path: app.path, block_in: false, block_out: false, up_limit: null, down_limit: null };
+  const rule = { ...cur, path: cur.path || app.path, ...patch };
+  try { await api("/api/rule", rule); } catch (e) { alert(e.message); }
+  refresh();
+}
+
+// ---- applications table ------------------------------------------------
+const rows = new Map();   // key -> {tr, detail, cells}
+let expanded = null;
+let lastApps = [];
+
+function kbInput(title, disabled, onSet) {
+  const i = el("input", { type: "number", min: "1", step: "1", placeholder: "no limit", title });
+  if (disabled) i.disabled = true;
+  i.addEventListener("click", (e) => e.stopPropagation());
+  i.addEventListener("change", () => onSet(i.value === "" ? null : Math.max(1, Math.round(+i.value * 1024))));
+  return i;
+}
+
+// Firewall setting <-> rule fields.
+const FW_LABEL = { allow: "Allow", out: "Block outgoing", in: "Block incoming", all: "Block all" };
+function fwSelect() {
+  return el("select", { class: "block", title: "Firewall" },
+    ...Object.entries(FW_LABEL).map(([v, t]) => el("option", { value: v }, t)));
+}
+function fwValue(rule) {
+  const i = !!(rule && rule.block_in), o = !!(rule && rule.block_out);
+  return i && o ? "all" : o ? "out" : i ? "in" : "allow";
+}
+const fwPatch = (v) => ({ block_out: v === "out" || v === "all", block_in: v === "in" || v === "all" });
+
+function makeRow(app) {
+  const r = { app };
+  r.name = el("td", { class: "name" });
+  r.cells = ["num down", "num up", "num down", "num up"].map((c) => el("td", { class: c }));
+  r.spark = el("canvas", { class: "spark" });
+  r.block = fwSelect();
+  r.block.addEventListener("click", (e) => e.stopPropagation());
+  r.block.addEventListener("change", () => {
+    const v = r.block.value;
+    if (v !== "allow" && !confirm(`${FW_LABEL[v]} for ${r.app.name}?`)) { r.block.value = fwValue(r.app.rule); return; }
+    saveRule(r.app, fwPatch(v));
+  });
+  r.upIn = kbInput("Upload limit, KB/s", false, (v) => saveRule(r.app, { up_limit: v }));
+  r.downIn = kbInput("Download limit, KB/s", !window.shaper, (v) => saveRule(r.app, { down_limit: v }));
+  const rule = el("div", { class: "rule" }, r.block,
+    el("label", {}, "↑", r.upIn), el("label", { title: window.shaperNote || "" }, "↓", r.downIn));
+  r.tr = el("tr", { class: "app", "data-key": app.key, onclick: () => toggleDetail(r.app.key) },
+    r.name, ...r.cells, el("td", {}, r.spark), el("td", {}, rule));
+  r.detail = el("tr", { class: "detail hidden" }, el("td", { colspan: "7" }, "Loading…"));
+  return r;
+}
+
+function setInput(input, bytes) {
+  if (document.activeElement === input) return;  // never overwrite what is being typed
+  input.value = bytes ? Math.round(bytes / 1024) : "";
+}
+
+function updateRow(r, a) {
+  r.app = a;
+  const fw = fwValue(a.rule);
+  const running = a.pids.length > 0;
+  r.tr.classList.toggle("blocked", fw === "all");
+  r.tr.classList.toggle("idle", !running);
+  const title = el("b", {}, a.name);
+  if (/[*?]/.test(a.path)) title.append(el("span", { class: "tag", title: "Wildcard rule: applies to every matching file, re-checked each minute" }, "pattern"));
+  else if (!running) title.append(el("span", { class: "tag" }, "not active"));
+  r.name.replaceChildren(title, el("small", { title: a.path }, a.path + (running ? `  ·  PID ${a.pids.join(", ")}` : "")));
+  const vals = [fmtRate(a.down_rate), fmtRate(a.up_rate), fmtBytes(a.down_total), fmtBytes(a.up_total)];
+  r.cells.forEach((c, i) => (c.textContent = vals[i]));
+  if (document.activeElement !== r.block) r.block.value = fw;
+  r.block.classList.toggle("on", fw === "all");
+  r.block.classList.toggle("part", fw === "in" || fw === "out");
+  setInput(r.upIn, a.rule && a.rule.up_limit);
+  setInput(r.downIn, a.rule && a.rule.down_limit);
+  r.downIn.disabled = !window.shaper;
+  r.downIn.parentElement.title = window.shaperNote;
+  drawHistory(r.spark, a.history, false);
+}
+
+async function toggleDetail(key) {
+  const r = rows.get(key);
+  if (expanded && expanded !== key) rows.get(expanded)?.detail.classList.add("hidden");
+  expanded = expanded === key ? null : key;
+  r.detail.classList.toggle("hidden", expanded !== key);
+  if (expanded === key) loadDetail(r);
+}
+
+async function loadDetail(r) {
+  const td = r.detail.firstChild;
+  try {
+    const conns = await api("/api/connections?app=" + encodeURIComponent(r.app.key));
+    if (!conns.length) { td.replaceChildren(el("span", { class: "muted" }, "No open connections.")); return; }
+    const t = el("table", {}, el("tr", {}, ...["Proto", "Local", "Remote", "State", "PID"].map((h) => el("th", {}, h))));
+    for (const c of conns) t.append(el("tr", {}, ...[c.proto, c.local, c.remote, c.state, String(c.pid)].map((v) => el("td", {}, v))));
+    td.replaceChildren(t);
+  } catch (e) { td.textContent = e.message; }
+}
+
+// ---- sorting & view (remembered per browser) ---------------------------------
+function remember(k, v) { try { localStorage.setItem("netleash." + k, JSON.stringify(v)); } catch {} }
+function recall(k, d) { try { return JSON.parse(localStorage.getItem("netleash." + k)) ?? d; } catch { return d; } }
+let sort = recall("sort", { key: "name", dir: 1 });
+$("view").value = recall("view", "all");
+
+function compare(a, b) {
+  if (sort.key === "name") {
+    return sort.dir * (a.name.localeCompare(b.name, undefined, { sensitivity: "base", numeric: true })
+      || a.key.localeCompare(b.key));
+  }
+  // Numeric columns: ties fall back to name so equal rows never swap places.
+  return sort.dir * (a[sort.key] - b[sort.key]) || a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
+}
+
+function renderSortHeaders() {
+  for (const th of document.querySelectorAll("th.sort")) {
+    const on = th.dataset.sort === sort.key;
+    th.classList.toggle("on", on);
+    th.dataset.label ??= th.textContent;
+    th.textContent = th.dataset.label + (on ? (sort.dir > 0 ? " ▲" : " ▼") : "");
+  }
+}
+for (const th of document.querySelectorAll("th.sort")) {
+  th.addEventListener("click", () => {
+    const k = th.dataset.sort;
+    sort = sort.key === k ? { key: k, dir: -sort.dir } : { key: k, dir: k === "name" ? 1 : -1 };
+    remember("sort", sort);
+    renderSortHeaders();
+    renderApps(lastApps);
+  });
+}
+renderSortHeaders();
+$("view").addEventListener("change", () => { remember("view", $("view").value); renderApps(lastApps); });
+
+function renderApps(apps) {
+  lastApps = apps;
+  const q = $("filter").value.trim().toLowerCase();
+  const view = $("view").value;
+  const shown = apps
+    .filter((a) => !q || a.key.includes(q) || a.name.toLowerCase().includes(q))
+    .filter((a) => view === "all" || (view === "active" ? a.pids.length > 0 : !!a.rule))
+    .sort(compare);
+  const editing = document.activeElement && document.activeElement.closest && document.activeElement.closest("#apps");
+  const body = $("apps");
+  const seen = new Set();
+  for (const a of shown) {
+    seen.add(a.key);
+    let r = rows.get(a.key);
+    if (!r) { r = makeRow(a); rows.set(a.key, r); }
+    updateRow(r, a);
+  }
+  for (const [k, r] of rows) if (!seen.has(k)) { r.tr.remove(); r.detail.remove(); if (!apps.some((a) => a.key === k)) rows.delete(k); }
+  // Only touch the DOM order when it actually changed, and never while an
+  // input is being edited (moving a node steals its focus).
+  const current = [...body.querySelectorAll("tr.app")].map((tr) => tr.dataset.key);
+  const wanted = shown.map((a) => a.key);
+  if (!editing && current.join("\n") !== wanted.join("\n")) {
+    for (const k of wanted) { const r = rows.get(k); body.append(r.tr, r.detail); }
+  } else if (editing) {
+    for (const k of wanted) { const r = rows.get(k); if (!r.tr.isConnected) body.append(r.tr, r.detail); }
+  }
+  if (expanded && rows.has(expanded) && seen.has(expanded) && Date.now() % 5000 < 1000) loadDetail(rows.get(expanded));
+  $("count").textContent = `${shown.length} of ${apps.length} programs`;
+}
+
+// ---- add a program by path ----------------------------------------------------
+$("add-toggle").addEventListener("click", () => { $("addform").classList.toggle("hidden"); $("add-path").focus(); });
+$("add-save").addEventListener("click", async () => {
+  const path = $("add-path").value.trim().replace(/^"(.*)"$/, "$1");   // tolerate "Copy as path" quotes
+  const kb = (id) => ($(id).value === "" ? null : Math.max(1, Math.round(+$(id).value * 1024)));
+  if (!/^[a-z]:\\|^\\\\/i.test(path)) { alert("Enter the full path of the program, e.g. C:\\Program Files\\App\\app.exe"); return; }
+  try {
+    await api("/api/rule", { path, ...fwPatch($("add-fw").value), up_limit: kb("add-up"), down_limit: kb("add-down") });
+    for (const id of ["add-path", "add-up", "add-down"]) $(id).value = "";
+    $("addform").classList.add("hidden");
+    refresh();
+  } catch (e) { alert(e.message); }
+});
+
+// ---- import from NetLimiter ------------------------------------------------------
+const DEFAULT_NL = "C:\\ProgramData\\Locktime\\NetLimiter\\5\\nl_settings.xml";
+function fmtLimit(b) { return b ? `${Math.round(b / 1024)} KB/s` : ""; }
+
+function renderPlan(plan, applied) {
+  const out = [];
+  const missing = new Set(plan.missing_files.map((p) => p.toLowerCase()));
+  out.push(el("h3", {}, applied
+    ? `Imported ${plan.rules.length} programs.`
+    : `${plan.rules.length} programs will get rules`));
+  if (plan.rules.length) {
+    const t = el("table", {}, el("tr", {}, ...["Program", "Firewall", "↑ limit", "↓ limit", ""].map((h) => el("th", {}, h))));
+    for (const r of plan.rules) {
+      t.append(el("tr", {},
+        el("td", { title: r.path }, r.path),
+        el("td", {}, FW_LABEL[fwValue(r)]),
+        el("td", {}, fmtLimit(r.up_limit)), el("td", {}, fmtLimit(r.down_limit)),
+        el("td", { class: "warn" }, missing.has(r.path.toLowerCase()) ? "file not found" : "")));
+    }
+    out.push(el("div", { class: "wrap" }, t));
+  }
+  if (plan.missing_files.length) {
+    out.push(el("p", { class: "warn" }, `${plan.missing_files.length} of these programs aren't on disk right now ` +
+      "(uninstalled, or on a drive that isn't connected). Their rules are kept, but Windows can only enforce " +
+      "a block once the file exists; NetLeash retries whenever rules change or it restarts."));
+  }
+  const groups = new Map();
+  for (const s of plan.skipped) { if (!groups.has(s.reason)) groups.set(s.reason, []); groups.get(s.reason).push(s.what); }
+  out.push(el("h3", {}, `${plan.skipped.length} NetLimiter rules not imported`));
+  for (const [reason, items] of [...groups].sort((a, b) => b[1].length - a[1].length)) {
+    out.push(el("details", {}, el("summary", {}, `${items.length} × ${reason}`),
+      el("ul", {}, ...items.map((w) => el("li", { class: "muted" }, w)))));
+  }
+  $("import-result").replaceChildren(...out);
+}
+
+async function importRun(apply) {
+  $("import-apply").disabled = true;
+  $("import-result").replaceChildren(el("p", { class: "muted" }, apply ? "Importing…" : "Reading…"));
+  try {
+    const plan = await api("/api/import/netlimiter", { path: $("import-path").value.trim(), apply });
+    renderPlan(plan, apply);
+    $("import-apply").disabled = apply || plan.rules.length === 0;
+    if (apply) { $("view").value = "rules"; remember("view", "rules"); refresh(); }
+  } catch (e) {
+    $("import-result").replaceChildren(el("p", { class: "bad" }, e.message));
+  }
+}
+$("import-open").addEventListener("click", () => {
+  if (!$("import-path").value) $("import-path").value = DEFAULT_NL;
+  $("import").showModal();
+  importRun(false);
+});
+$("import-preview").addEventListener("click", () => importRun(false));
+$("import-apply").addEventListener("click", () => importRun(true));
+$("import-close").addEventListener("click", () => $("import").close());
+
+// ---- header ------------------------------------------------------------
+function chip(label, status) {
+  const cls = /^ok|^demo/.test(status) ? "ok" : /^error/.test(status) ? "bad" : "warn";
+  return el("span", { class: "chip " + cls, title: status }, el("i"), label);
+}
+
+function renderHeader(s) {
+  $("down").textContent = fmtRate(s.down_rate);
+  $("up").textContent = fmtRate(s.up_rate);
+  $("mode").textContent = s.demo ? "demo" : "";
+  $("demo-banner").classList.toggle("hidden", !s.demo);
+  window.shaper = /^(ok|demo)/.test(s.status.shaper);
+  window.shaperNote = window.shaper ? "" : "Download limits need WinDivert, which is not available: " + s.status.shaper;
+  $("chips").replaceChildren(chip("Monitor", s.status.monitor), chip("Blocking", s.status.blocker),
+    chip("Upload limits", s.status.limiter), chip("Download limits", s.status.shaper));
+  drawHistory($("total"), s.history, true);
+  $("log").textContent = s.log.join("\n") || "(empty)";
+  document.title = `↓ ${fmtRate(s.down_rate)} ↑ ${fmtRate(s.up_rate)} — NetLeash`;
+}
+
+// ---- usage history -----------------------------------------------------
+async function renderUsage() {
+  const usage = await api("/api/usage");
+  const days = Object.keys(usage).sort().reverse();
+  const sel = $("day"), keep = sel.value;
+  sel.replaceChildren(...days.map((d) => el("option", { value: d }, d)));
+  if (days.includes(keep)) sel.value = keep;
+  const day = usage[sel.value] || {};
+  const list = Object.entries(day).map(([p, [u, d]]) => ({ p, u, d })).sort((a, b) => b.u + b.d - (a.u + a.d));
+  let tu = 0, td = 0;
+  $("usage").replaceChildren(...list.map(({ p, u, d }) => {
+    tu += u; td += d;
+    return el("tr", {}, el("td", { class: "name" }, el("b", {}, p.split(/[\\/]/).pop()), el("small", {}, p)),
+      el("td", { class: "num down" }, fmtBytes(d)), el("td", { class: "num up" }, fmtBytes(u)), el("td", { class: "num" }, fmtBytes(u + d)));
+  }));
+  $("daytotal").textContent = days.length ? `↓ ${fmtBytes(td)}   ↑ ${fmtBytes(tu)}` : "No history yet.";
+}
+$("day").addEventListener("change", renderUsage);
+
+// ---- tabs & loop ---------------------------------------------------------
+let tab = "apps";
+for (const b of document.querySelectorAll("nav button")) {
+  b.addEventListener("click", () => {
+    tab = b.dataset.tab;
+    document.querySelectorAll("nav button").forEach((x) => x.classList.toggle("on", x === b));
+    for (const t of ["apps", "usage", "log"]) $("tab-" + t).classList.toggle("hidden", t !== tab);
+    if (tab === "usage") renderUsage();
+  });
+}
+$("filter").addEventListener("input", () => renderApps(lastApps));
+
+let failing = false;
+async function refresh() {
+  try {
+    const s = await api("/api/state");
+    renderHeader(s);
+    renderApps(s.apps);
+    if (failing) { failing = false; $("chips").classList.remove("bad"); }
+  } catch (e) {
+    failing = true;
+    $("chips").replaceChildren(chip("Not connected: " + e.message, "error"));
+  }
+}
+refresh();
+setInterval(refresh, 1000);
+setInterval(() => tab === "usage" && renderUsage(), 10000);
+</script>
+</body>
+</html>
