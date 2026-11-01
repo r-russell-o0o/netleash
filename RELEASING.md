@@ -9,10 +9,11 @@ Done:
 - [x] Third-party notes: WinDivert's licence, and the NetLimiter trademark disclaimer
 
 Still to decide or do:
-- [ ] **Name.** A US trademark "NETLEASH" exists for computer software
-      (serial 85277613, filed around 2011, for recovering lost or stolen phones).
-      Check its status at <https://tsdr.uspto.gov/#caseNumber=85277613&caseType=SERIAL_NO&searchType=statusSearch>.
-      If it's live, rename before publishing; that's far cheaper now than later.
+- [x] **Name, US.** The only US trademark "NETLEASH" (serial 85277613, for
+      phone-recovery software) was abandoned: no Statement of Use was filed after
+      its Notice of Allowance. Checked 2026-11-01.
+- [ ] **Name, EU.** Search the EU register (EUIPO eSearch, <https://euipo.europa.eu/eSearch/>)
+      for "NetLeash" in class 9 (software) before spending money on the name.
 - [ ] **Finish the testing status** in the README: blocking, the connections
       panel, clean-up after uninstalling, and starting at boot after a restart.
 - [ ] **Code signing (optional).** Without it, SmartScreen warns about an unknown
