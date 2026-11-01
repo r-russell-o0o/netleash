@@ -20,6 +20,44 @@ present. Without it, NetLeash falls back to Windows QoS, which can limit uploads
 | Daily usage history | `usage.json`, 120 days (`src/state.rs`) | – |
 | Web UI | `http://127.0.0.1:5199`, single file `ui/index.html` | – |
 
+## ⚠ Download limits need one manual step: a Defender exclusion
+
+Everything except bandwidth limiting works straight after installing:
+monitoring, blocking, the rules and the NetLimiter import. Limits need the
+WinDivert driver, and **Microsoft Defender deletes WinDivert unless you exclude
+its folder yourself**. Defender classes it as "potentially unwanted" because
+malware uses it too.
+
+**Do this once per PC, before or during the install:**
+
+1. Open **Windows Security** (Start menu, or press **O** at the installer's prompt).
+2. Go to **Virus & threat protection > Manage settings** (under "Virus & threat protection settings").
+3. Scroll to **Exclusions > Add or remove exclusions > Add an exclusion > Folder**.
+4. Choose **`C:\Program Files\NetLeash\windivert`**. The installer creates this
+   folder, so it already exists when the installer asks.
+5. Back in the installer, answer **Y** (or **R** to retry after a blocked download).
+   If you've already finished installing, run `Install.cmd` again; your rules are kept.
+
+You can tell it worked when the installer prints `WinDivert installed`. In the UI,
+the **Download limits** chip is green and the yellow "Download limits are off"
+notice is gone.
+
+**Why NetLeash doesn't do this for you:** no legitimate way exists. A program
+that adds its own antivirus exclusion is behaving like malware, and Defender
+treats it that way: an earlier installer that called `Add-MpPreference` was
+blocked as `Trojan:PowerShell/Killav.VDA!MTB` (antivirus tampering). The other
+"automatic" routes either hide the exclusion step from Defender or change the
+driver files so Defender stops recognising them. Both are evasion, and neither
+belongs in a tool you want to trust. The only clean alternative is to report the
+detection to Microsoft as a false positive
+(<https://www.microsoft.com/wdsi/filesubmission>), and whether they change it is
+up to them.
+
+The exclusion covers that one folder only. NetLeash downloads WinDivert from
+the official GitHub release, refuses it unless the SHA-256 matches, and checks
+the driver's signature. After uninstalling, remove the exclusion in the same
+place in Windows Security.
+
 ## Installing (this PC or others)
 
 ```powershell
@@ -29,12 +67,12 @@ present. Without it, NetLeash falls back to Windows QoS, which can limit uploads
 Copy the zip to any 64-bit Windows 10/11 PC, unzip it, and double-click `Install.cmd`.
 The installer (`installer\install.ps1`):
 - copies `netleash.exe` to `C:\Program Files\NetLeash`
-- offers to install WinDivert. It creates `C:\Program Files\NetLeash\windivert`
-  and asks you to exclude that folder in Windows Security first. The installer
-  never changes Defender settings itself: an earlier version that did was flagged
-  by Defender as `Trojan:PowerShell/Killav` (antivirus tampering), which is fair
-  for any script that does that. The driver is downloaded and hash-checked, so the
-  zip contains nothing for Defender to flag. Use `-WinDivertZip FILE` for offline PCs.
+- offers to install WinDivert after you've added the Defender exclusion
+  (see the section above). It never changes Defender settings itself. If
+  Defender still removes the download, you can add the exclusion and press **R**
+  to retry, or continue without download limits. The zip contains no WinDivert
+  files, so there's nothing in it for Defender to flag. Use `-WinDivertZip FILE`
+  for offline PCs.
 - registers the scheduled task **NetLeash**: it runs as SYSTEM at boot,
   before anyone logs in. A second trigger fires every 5 minutes and restarts
   NetLeash if it has stopped; while it's running that trigger does nothing.
@@ -85,12 +123,14 @@ On this machine (2026-11-01) that's 35 programs from 68 Deny rules. 22 of them
 aren't on disk at the moment; those rules are kept and start working once the
 file exists.
 
-### WinDivert
+### WinDivert for development builds
 
-WinDivert isn't committed to the repo. To get it:
+WinDivert isn't committed to the repo. To get it for a build run from the
+project folder (installed copies get it from the installer):
 
-1. Defender flags WinDivert as "potentially unwanted", because malware uses it too.
-   In an Administrator PowerShell, add an exclusion for its folder only:
+1. Add a Defender exclusion for `S:\Projects\netleash\vendor\WinDivert-2.2.2-A`
+   the same way as above (Windows Security > Exclusions > Folder). Or run this
+   yourself in an Administrator PowerShell:
    `Add-MpPreference -ExclusionPath "S:\Projects\netleash\vendor\WinDivert-2.2.2-A"`
 2. Run `.\fetch-windivert.ps1`. It downloads the official 2.2.2 release from
    `github.com/basil00/WinDivert` and refuses the file unless its SHA-256 is

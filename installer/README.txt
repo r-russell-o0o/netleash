@@ -2,19 +2,31 @@ NetLeash - per-program network monitor, firewall and bandwidth limiter
 =====================================================================
 
 INSTALL
-  Double-click Install.cmd and approve the Administrator prompt.
+  1. Double-click Install.cmd and approve the Administrator prompt.
+  2. Answer the WinDivert question (see below).
   NetLeash then starts automatically at every boot (before anyone logs in)
   and restarts itself within 5 minutes if it ever stops.
 
-  The installer asks whether to install WinDivert, the driver used for
-  upload/download limits. It is open source, but Microsoft Defender flags it
-  as "potentially unwanted" and deletes it unless you exclude its folder.
-  The installer does not change Defender settings itself; when it asks, add
-  the exclusion in Windows Security:
-    Virus & threat protection > Manage settings > Exclusions >
-    Add an exclusion > Folder > C:\Program Files\NetLeash\windivert
-  Without WinDivert, blocking and upload limits still work; download limits
-  don't. Run Install.cmd again at any time to add it.
+DOWNLOAD LIMITS NEED ONE MANUAL STEP: A DEFENDER EXCLUSION
+  Monitoring, blocking and rules work without this. Upload/download limits
+  need the open-source WinDivert driver, and Microsoft Defender deletes it
+  (as "potentially unwanted", because malware uses it too) unless YOU
+  exclude its folder. NetLeash will not change Defender settings for you:
+  a program that adds its own antivirus exclusion is behaving like malware.
+
+  When the installer asks about WinDivert:
+    1. Press O to open Windows Security (or open it from the Start menu)
+    2. Virus & threat protection > Manage settings
+    3. Exclusions > Add or remove exclusions > Add an exclusion > Folder
+    4. Choose:  C:\Program Files\NetLeash\windivert
+       (the installer has already created it)
+    5. Back in the installer, press Y. If you forgot and Defender removed
+       the download, add the exclusion now and press R to retry.
+
+  It worked if the installer prints "WinDivert installed". In the UI,
+  the "Download limits" chip turns green.
+  Skipped it? Add the exclusion and run Install.cmd again at any time.
+  Your rules are kept.
 
   Options (run install.ps1 from an Administrator PowerShell):
     -WinDivert          install WinDivert without asking (exclusion added first)
@@ -34,4 +46,5 @@ FILES
 UNINSTALL
   Settings > Apps > Installed apps > NetLeash > Uninstall,
   or run uninstall.ps1 (add -RemoveData to delete rules and history too).
-  Afterwards, remove the WinDivert exclusion in Windows Security if you added one.
+  Afterwards, remove the WinDivert exclusion in Windows Security
+  (same place as step 3 above) if you added one.

@@ -78,24 +78,33 @@ try {
         # This installer never changes Defender settings itself: that is the
         # user's decision, made in Windows Security.
         New-Item -ItemType Directory -Force $wd | Out-Null
-        $go = $WinDivert
-        if (-not $go) {
-            Write-Host @"
-Bandwidth limits use the open-source WinDivert driver (github.com/basil00/WinDivert).
-Microsoft Defender flags it as "potentially unwanted" because malware uses it too,
-so Defender will delete it unless you exclude this one folder:
+        $howTo = @"
+Microsoft Defender flags WinDivert as "potentially unwanted" (malware uses it
+too) and deletes it unless YOU exclude this one folder. This installer will
+not change Defender settings for you.
 
     $wd
 
-To do that: Windows Security > Virus & threat protection > Manage settings >
-Exclusions > Add or remove exclusions > Add an exclusion > Folder, and pick it.
-
-Without WinDivert, blocking and upload limits (via Windows QoS) still work;
-download limits don't. You can re-run this installer later to add it.
+  1. Open Windows Security (press O below to open it)
+  2. Virus & threat protection > Manage settings (under "settings")
+  3. Exclusions > Add or remove exclusions > Add an exclusion > Folder
+  4. Choose the folder above
 "@
-            $go = (Read-Host 'Install WinDivert now? (add the exclusion first) [y/N]') -match '^(y|yes)$'
+        $go = $WinDivert
+        if (-not $go) {
+            Write-Host "Bandwidth limits use the open-source WinDivert driver (github.com/basil00/WinDivert)."
+            Write-Host $howTo
+            Write-Host "Without WinDivert, blocking and upload limits (via Windows QoS) still work; download limits don't."
+            while ($true) {
+                $answer = Read-Host "`nY = exclusion added, install WinDivert   O = open Windows Security   N = skip"
+                if ($answer -match '^o') { Start-Process 'windowsdefender://threatsettings'; continue }
+                $go = $answer -match '^y'
+                break
+            }
         }
-        if ($go) {
+        # Interactive runs may retry after fixing the exclusion; -WinDivert runs try once.
+        while ($go) {
+            $go = $false
             $zip = Join-Path $wd 'WinDivert.zip'
             $tmp = Join-Path $wd 'extract'
             try {
@@ -119,16 +128,27 @@ download limits don't. You can re-run this installer later to add it.
                     Remove-Item (Join-Path $wd 'WinDivert*') -Force
                     throw 'the driver signature is not valid'
                 }
+                Write-Host 'WinDivert installed.' -ForegroundColor Green
             } catch {
                 # Most likely Defender removed the files because the folder
-                # isn't excluded. Carry on: everything but limits still works.
-                Write-Host "WinDivert not installed: $($_.Exception.Message)" -ForegroundColor Yellow
-                Write-Host "If Defender blocked it, add the exclusion for $wd and run the installer again."
+                # isn't excluded yet. Everything but limits works without it.
+                Write-Host "`nWinDivert not installed: $($_.Exception.Message)" -ForegroundColor Yellow
+                $blocked = "$($_.Exception.Message)" -match 'virus|unwanted'
+                if ($blocked) { Write-Host "Defender removed it: the folder isn't excluded yet.`n$howTo" }
+                if (-not $WinDivert) {
+                    while ($true) {
+                        $answer = Read-Host "`nR = retry (after adding the exclusion)   O = open Windows Security   N = continue without it"
+                        if ($answer -match '^o') { Start-Process 'windowsdefender://threatsettings'; continue }
+                        $go = $answer -match '^r'
+                        break
+                    }
+                }
             } finally {
                 Remove-Item $tmp, $zip -Recurse -Force -ErrorAction SilentlyContinue
             }
-        } else {
-            Write-Host 'Skipped. Run the installer again to add it later.'
+        }
+        if (-not (Test-Path (Join-Path $wd 'WinDivert64.sys'))) {
+            Write-Host 'Continuing without WinDivert. Run Install.cmd again at any time to add it.'
         }
     }
 

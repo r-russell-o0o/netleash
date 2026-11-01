@@ -112,6 +112,18 @@
   <section id="tab-apps">
     <div id="demo-banner" class="banner hidden">Demo mode: traffic is synthetic (attributed to processes that really have
       connections open), and rules are simulated. Nothing on your system is changed.</div>
+    <div id="wd-banner" class="banner hidden">
+      <b>Download limits are off: the WinDivert driver isn't installed.</b>
+      Blocking and upload limits work without it. To turn download limits on:
+      <ol style="margin:6px 0 4px 18px; padding:0">
+        <li>In <b>Windows Security</b>, go to Virus &amp; threat protection &gt; Manage settings &gt; Exclusions
+          &gt; Add an exclusion &gt; Folder, and choose <code>C:\Program Files\NetLeash\windivert</code>.
+          Defender deletes WinDivert otherwise, because malware uses it too; NetLeash won't change Defender settings for you.</li>
+        <li>Run <b>Install.cmd</b> from the NetLeash package again and answer <b>Y</b>. Your rules are kept.</li>
+      </ol>
+      <span class="muted" id="wd-detail"></span>
+      <button class="act" id="wd-hide" style="margin-top:6px">Hide</button>
+    </div>
     <div class="toolbar">
       <input type="search" id="filter" placeholder="Filter by name or path">
       <select id="view" title="Which programs to list">
@@ -399,6 +411,8 @@ function renderApps(apps) {
   $("count").textContent = `${shown.length} of ${apps.length} programs`;
 }
 
+$("wd-hide").addEventListener("click", () => { remember("wdHidden", true); $("wd-banner").classList.add("hidden"); });
+
 // ---- add a program by path ----------------------------------------------------
 $("add-toggle").addEventListener("click", () => { $("addform").classList.toggle("hidden"); $("add-path").focus(); });
 $("add-save").addEventListener("click", async () => {
@@ -482,6 +496,8 @@ function renderHeader(s) {
   $("mode").textContent = s.demo ? "demo" : "";
   $("demo-banner").classList.toggle("hidden", !s.demo);
   window.shaper = /^(ok|demo)/.test(s.status.shaper);
+  $("wd-banner").classList.toggle("hidden", s.demo || window.shaper || recall("wdHidden", false));
+  $("wd-detail").textContent = "Status: " + s.status.shaper;
   window.shaperNote = window.shaper ? "" : "Download limits need WinDivert, which is not available: " + s.status.shaper;
   $("chips").replaceChildren(chip("Monitor", s.status.monitor), chip("Blocking", s.status.blocker),
     chip("Upload limits", s.status.limiter), chip("Download limits", s.status.shaper));
