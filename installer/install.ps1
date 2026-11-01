@@ -12,7 +12,7 @@
 param(
     [string]$InstallDir = (Join-Path $env:ProgramFiles 'NetLeash'),
     [int]$Port = 5199,
-    # Install WinDivert without asking (adds a Defender exclusion for its folder).
+    # Install WinDivert without asking (you add its Defender exclusion yourself first).
     [switch]$WinDivert,
     # Skip WinDivert: blocking and upload limits still work, download limits don't.
     [switch]$NoWinDivert,
@@ -74,46 +74,61 @@ try {
         Step 'WinDivert already installed, keeping it'
     } else {
         Step 'WinDivert (needed for upload/download limits)'
+        # The folder is created first so it can be picked in Windows Security.
+        # This installer never changes Defender settings itself: that is the
+        # user's decision, made in Windows Security.
+        New-Item -ItemType Directory -Force $wd | Out-Null
         $go = $WinDivert
         if (-not $go) {
             Write-Host @"
 Bandwidth limits use the open-source WinDivert driver (github.com/basil00/WinDivert).
 Microsoft Defender flags it as "potentially unwanted" because malware uses it too,
-so installing it adds a Defender exclusion for this one folder:
+so Defender will delete it unless you exclude this one folder:
+
     $wd
-Without it, blocking and upload limits (via Windows QoS) still work; download limits don't.
+
+To do that: Windows Security > Virus & threat protection > Manage settings >
+Exclusions > Add or remove exclusions > Add an exclusion > Folder, and pick it.
+
+Without WinDivert, blocking and upload limits (via Windows QoS) still work;
+download limits don't. You can re-run this installer later to add it.
 "@
-            $go = (Read-Host 'Install WinDivert and add that exclusion? [y/N]') -match '^(y|yes)$'
+            $go = (Read-Host 'Install WinDivert now? (add the exclusion first) [y/N]') -match '^(y|yes)$'
         }
         if ($go) {
-            New-Item -ItemType Directory -Force $wd | Out-Null
-            if (Get-Command Add-MpPreference -ErrorAction SilentlyContinue) {
-                Add-MpPreference -ExclusionPath $wd
-                Write-Host "Defender exclusion added: $wd"
-            }
             $zip = Join-Path $wd 'WinDivert.zip'
-            if ($WinDivertZip) { Copy-Item $WinDivertZip $zip -Force }
-            else {
-                Write-Host "Downloading $WinDivertUrl"
-                [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-                Invoke-WebRequest $WinDivertUrl -OutFile $zip -UseBasicParsing
-            }
-            $hash = (Get-FileHash $zip -Algorithm SHA256).Hash
-            if ($hash -ne $WinDivertSha256) {
-                Remove-Item $zip -Force
-                throw "WinDivert download has the wrong SHA-256 ($hash). Not installing it."
-            }
             $tmp = Join-Path $wd 'extract'
-            Expand-Archive $zip -DestinationPath $tmp -Force
-            $x64 = Join-Path $tmp 'WinDivert-2.2.2-A\x64'
-            Copy-Item (Join-Path $x64 'WinDivert.dll'), (Join-Path $x64 'WinDivert64.sys') $wd -Force
-            Copy-Item (Join-Path $tmp 'WinDivert-2.2.2-A\LICENSE') (Join-Path $wd 'LICENSE.txt') -Force
-            Remove-Item $tmp, $zip -Recurse -Force
-            $sig = Get-AuthenticodeSignature (Join-Path $wd 'WinDivert64.sys')
-            Write-Host "Driver signature: $($sig.Status) ($($sig.SignerCertificate.Subject))"
-            if ($sig.Status -ne 'Valid') { throw 'WinDivert driver signature is not valid. Not installing it.' }
+            try {
+                if ($WinDivertZip) { Copy-Item $WinDivertZip $zip -Force }
+                else {
+                    Write-Host "Downloading $WinDivertUrl"
+                    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+                    Invoke-WebRequest $WinDivertUrl -OutFile $zip -UseBasicParsing
+                }
+                $hash = (Get-FileHash $zip -Algorithm SHA256).Hash
+                if ($hash -ne $WinDivertSha256) {
+                    throw "the download has the wrong SHA-256 ($hash)"
+                }
+                Expand-Archive $zip -DestinationPath $tmp -Force
+                $x64 = Join-Path $tmp 'WinDivert-2.2.2-A\x64'
+                Copy-Item (Join-Path $x64 'WinDivert.dll'), (Join-Path $x64 'WinDivert64.sys') $wd -Force
+                Copy-Item (Join-Path $tmp 'WinDivert-2.2.2-A\LICENSE') (Join-Path $wd 'LICENSE.txt') -Force
+                $sig = Get-AuthenticodeSignature (Join-Path $wd 'WinDivert64.sys')
+                Write-Host "Driver signature: $($sig.Status) ($($sig.SignerCertificate.Subject))"
+                if ($sig.Status -ne 'Valid') {
+                    Remove-Item (Join-Path $wd 'WinDivert*') -Force
+                    throw 'the driver signature is not valid'
+                }
+            } catch {
+                # Most likely Defender removed the files because the folder
+                # isn't excluded. Carry on: everything but limits still works.
+                Write-Host "WinDivert not installed: $($_.Exception.Message)" -ForegroundColor Yellow
+                Write-Host "If Defender blocked it, add the exclusion for $wd and run the installer again."
+            } finally {
+                Remove-Item $tmp, $zip -Recurse -Force -ErrorAction SilentlyContinue
+            }
         } else {
-            Write-Host 'Skipped. Re-run the installer with -WinDivert to add it later.'
+            Write-Host 'Skipped. Run the installer again to add it later.'
         }
     }
 

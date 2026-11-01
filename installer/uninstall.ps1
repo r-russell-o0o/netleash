@@ -36,9 +36,6 @@ Get-NetQosPolicy -PolicyStore ActiveStore -ErrorAction SilentlyContinue |
 sc.exe stop WinDivert 2>$null | Out-Null   # fails harmlessly if another program still uses it
 
 $wd = Join-Path $InstallDir 'windivert'
-if (Get-Command Remove-MpPreference -ErrorAction SilentlyContinue) {
-    Remove-MpPreference -ExclusionPath $wd -ErrorAction SilentlyContinue
-}
 Remove-Item (Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs\NetLeash.url') -ErrorAction SilentlyContinue
 Remove-Item (Join-Path $env:PUBLIC 'Desktop\NetLeash.url') -ErrorAction SilentlyContinue
 Remove-Item 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\NetLeash' -Recurse -ErrorAction SilentlyContinue
@@ -57,4 +54,9 @@ if ($RemoveData) {
     Write-Host "Kept rules and history in $DataDir (use -RemoveData to delete them)."
 }
 Write-Host 'NetLeash removed.' -ForegroundColor Green
+Write-Host @"
+If you added a Defender exclusion for WinDivert, you can remove it now:
+Windows Security > Virus & threat protection > Manage settings > Exclusions,
+entry: $wd
+"@
 if ($Host.Name -eq 'ConsoleHost') { Read-Host 'Press Enter to close' | Out-Null }

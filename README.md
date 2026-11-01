@@ -29,10 +29,12 @@ present. Without it, NetLeash falls back to Windows QoS, which can limit uploads
 Copy the zip to any 64-bit Windows 10/11 PC, unzip it, and double-click `Install.cmd`.
 The installer (`installer\install.ps1`):
 - copies `netleash.exe` to `C:\Program Files\NetLeash`
-- offers to install WinDivert. It asks first, because yes adds a Defender
-  exclusion for `C:\Program Files\NetLeash\windivert`. The driver is downloaded
-  and hash-checked, so the zip itself contains nothing for Defender to flag.
-  Use `-WinDivertZip FILE` for offline PCs.
+- offers to install WinDivert. It creates `C:\Program Files\NetLeash\windivert`
+  and asks you to exclude that folder in Windows Security first. The installer
+  never changes Defender settings itself: an earlier version that did was flagged
+  by Defender as `Trojan:PowerShell/Killav` (antivirus tampering), which is fair
+  for any script that does that. The driver is downloaded and hash-checked, so the
+  zip contains nothing for Defender to flag. Use `-WinDivertZip FILE` for offline PCs.
 - registers the scheduled task **NetLeash**: it runs as SYSTEM at boot,
   before anyone logs in. A second trigger fires every 5 minutes and restarts
   NetLeash if it has stopped; while it's running that trigger does nothing.
@@ -43,7 +45,7 @@ The installer (`installer\install.ps1`):
 
 Running the installer again upgrades in place, and your rules are kept. To uninstall,
 use Installed apps or `uninstall.ps1` (add `-RemoveData` to delete rules and history).
-Uninstalling removes the Defender exclusion too.
+Afterwards, remove the WinDivert exclusion in Windows Security if you added one.
 
 Log file: `C:\ProgramData\NetLeash\netleash.log` (1 MB, plus one older file).
 
