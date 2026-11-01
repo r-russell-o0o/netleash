@@ -81,6 +81,10 @@
   dialog table td, dialog table th { padding: 4px 8px; font-size: 12px; }
   dialog details { margin: 4px 0; } dialog summary { cursor: pointer; }
   .warn { color: var(--warn); } .bad { color: var(--bad); }
+  #picker { width: min(1180px, calc(100vw - 32px)); }
+  #picker td.name small { max-width: 420px; }
+  #picker td.why { white-space: normal; min-width: 160px; max-width: 280px; }
+  #picker td.why .tag { display: inline-block; margin: 1px 4px 1px 0; }
   tr.detail td { background: var(--hover); padding: 6px 10px 12px 28px; }
   tr.detail table td, tr.detail table th { border: 0; padding: 2px 12px 2px 0; background: none; font-size: 12px; }
   .muted { color: var(--muted); }
@@ -133,19 +137,8 @@
       </select>
       <span class="muted" id="count"></span>
       <span style="flex:1"></span>
-      <button class="act" id="add-toggle">Add program…</button>
+      <button class="act primary" id="picker-open">Find programs…</button>
       <button class="act" id="import-open">Import from NetLimiter…</button>
-    </div>
-    <div class="addform hidden" id="addform">
-      <input type="text" id="add-path" placeholder="Full path, e.g. C:\Program Files\App\app.exe" spellcheck="false">
-      <select id="add-fw">
-        <option value="allow">Allow</option><option value="out">Block outgoing</option>
-        <option value="in">Block incoming</option><option value="all" selected>Block all</option>
-      </select>
-      <label class="muted">↑ <input type="number" id="add-up" min="1" placeholder="no limit" style="width:86px"></label>
-      <label class="muted">↓ <input type="number" id="add-down" min="1" placeholder="no limit" style="width:86px"></label>
-      <button class="act primary" id="add-save">Add rule</button>
-      <span class="muted">Applies even while the program isn't running.</span>
     </div>
     <div class="wrap">
       <table>
@@ -170,6 +163,40 @@
   </section>
   <section id="tab-log" class="hidden"><pre class="log" id="log"></pre></section>
 </main>
+<dialog id="picker">
+  <div class="body">
+    <h2>Programs that use the network</h2>
+    <p class="muted" style="margin-top:0">Collected from NetLeash's usage history, programs with open connections right now,
+      and programs named in Windows Firewall rules. Rules apply even while a program isn't running.</p>
+    <div class="toolbar">
+      <input type="search" id="pick-q" placeholder="Search by name, company or path" style="flex:1">
+      <select id="pick-src" title="Where the program was found">
+        <option value="all">All sources</option>
+        <option value="running">Running now</option>
+        <option value="seen">Used the network (history)</option>
+        <option value="firewall">In Windows Firewall rules</option>
+        <option value="rules">With NetLeash rules</option>
+      </select>
+      <span class="muted" id="pick-count"></span>
+    </div>
+    <div class="wrap"><table>
+      <thead><tr><th>Program</th><th>Found because</th><th>Firewall · limits (KB/s)</th></tr></thead>
+      <tbody id="pick-list"></tbody>
+    </table></div>
+    <h3>Not listed? Enter its path</h3>
+    <div class="addform" id="addform" style="margin:0">
+      <input type="text" id="add-path" placeholder="Full path, e.g. C:\Program Files\App\app.exe" spellcheck="false">
+      <select id="add-fw">
+        <option value="allow">Allow</option><option value="out">Block outgoing</option>
+        <option value="in">Block incoming</option><option value="all" selected>Block all</option>
+      </select>
+      <label class="muted">↑ <input type="number" id="add-up" min="1" placeholder="no limit" style="width:86px"></label>
+      <label class="muted">↓ <input type="number" id="add-down" min="1" placeholder="no limit" style="width:86px"></label>
+      <button class="act" id="add-save">Add rule</button>
+    </div>
+  </div>
+  <div class="foot"><button class="act" id="picker-close">Close</button></div>
+</dialog>
 <dialog id="import">
   <div class="body">
     <h2>Import rules from NetLimiter</h2>
@@ -310,7 +337,10 @@ function updateRow(r, a) {
   const running = a.pids.length > 0;
   r.tr.classList.toggle("blocked", fw === "all");
   r.tr.classList.toggle("idle", !running);
-  const title = el("b", {}, a.name);
+  const title = el("b", {}, displayName(a));
+  if (a.description && a.description.toLowerCase() !== a.name.toLowerCase()) {
+    title.append(el("span", { class: "muted", style: "font-weight:400" }, "  " + a.name));
+  }
   if (/[*?]/.test(a.path)) title.append(el("span", { class: "tag", title: "Wildcard rule: applies to every matching file, re-checked each minute" }, "pattern"));
   else if (!running) title.append(el("span", { class: "tag" }, "not active"));
   r.name.replaceChildren(title, el("small", { title: a.path }, a.path + (running ? `  ·  PID ${a.pids.join(", ")}` : "")));
@@ -351,13 +381,15 @@ function recall(k, d) { try { return JSON.parse(localStorage.getItem("netleash."
 let sort = recall("sort", { key: "name", dir: 1 });
 $("view").value = recall("view", "all");
 
+// The program's own description ("Google Chrome") when it has one, else the file name.
+const displayName = (a) => a.description || a.name || a.file;
+const byName = (a, b) => displayName(a).localeCompare(displayName(b), undefined, { sensitivity: "base", numeric: true })
+  || a.key.localeCompare(b.key);
+
 function compare(a, b) {
-  if (sort.key === "name") {
-    return sort.dir * (a.name.localeCompare(b.name, undefined, { sensitivity: "base", numeric: true })
-      || a.key.localeCompare(b.key));
-  }
+  if (sort.key === "name") return sort.dir * byName(a, b);
   // Numeric columns: ties fall back to name so equal rows never swap places.
-  return sort.dir * (a[sort.key] - b[sort.key]) || a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
+  return sort.dir * (a[sort.key] - b[sort.key]) || byName(a, b);
 }
 
 function renderSortHeaders() {
@@ -385,7 +417,7 @@ function renderApps(apps) {
   const q = $("filter").value.trim().toLowerCase();
   const view = $("view").value;
   const shown = apps
-    .filter((a) => !q || a.key.includes(q) || a.name.toLowerCase().includes(q))
+    .filter((a) => !q || a.key.includes(q) || displayName(a).toLowerCase().includes(q))
     .filter((a) => view === "all" || (view === "active" ? a.pids.length > 0 : !!a.rule))
     .sort(compare);
   const editing = document.activeElement && document.activeElement.closest && document.activeElement.closest("#apps");
@@ -413,8 +445,72 @@ function renderApps(apps) {
 
 $("wd-hide").addEventListener("click", () => { remember("wdHidden", true); $("wd-banner").classList.add("hidden"); });
 
-// ---- add a program by path ----------------------------------------------------
-$("add-toggle").addEventListener("click", () => { $("addform").classList.toggle("hidden"); $("add-path").focus(); });
+// ---- program picker --------------------------------------------------------------
+let programs = [];
+
+function daysAgo(day) {
+  const d = Math.round((new Date().setHours(0, 0, 0, 0) - new Date(day + "T00:00:00")) / 86400000);
+  return d <= 0 ? "today" : d === 1 ? "yesterday" : `${d} days ago`;
+}
+
+function pickRow(p) {
+  const name = el("td", { class: "name" }, el("b", {}, displayName(p)),
+    el("small", { title: p.path }, [p.company, p.path].filter(Boolean).join("  ·  ")));
+  const why = [];
+  if (p.running) why.push(el("span", { class: "tag" }, "running now"));
+  if (p.seen_day) why.push(el("span", { class: "tag", title: "From NetLeash's usage history" },
+    `used ${daysAgo(p.seen_day)} · ${fmtBytes(p.seen_bytes)}`));
+  if (p.firewall.length) why.push(el("span", { class: "tag", title: "Windows Firewall rules for this program" },
+    "firewall: " + p.firewall.join(", ")));
+  if (!p.exists) why.push(el("span", { class: "tag warn" }, "file not found"));
+  const fw = fwSelect();
+  fw.value = fwValue(p.rule);
+  fw.classList.toggle("on", fw.value === "all");
+  fw.classList.toggle("part", fw.value === "in" || fw.value === "out");
+  fw.addEventListener("change", async () => {
+    if (fw.value !== "allow" && !confirm(`${FW_LABEL[fw.value]} for ${displayName(p)}?`)) { fw.value = fwValue(p.rule); return; }
+    await saveRule(p, fwPatch(fw.value));
+    loadPrograms();
+  });
+  const up = kbInput("Upload limit, KB/s", false, async (v) => { await saveRule(p, { up_limit: v }); loadPrograms(); });
+  const down = kbInput("Download limit, KB/s", !window.shaper, async (v) => { await saveRule(p, { down_limit: v }); loadPrograms(); });
+  up.value = p.rule && p.rule.up_limit ? Math.round(p.rule.up_limit / 1024) : "";
+  down.value = p.rule && p.rule.down_limit ? Math.round(p.rule.down_limit / 1024) : "";
+  const controls = el("div", { class: "rule" }, fw, el("label", {}, "↑", up), el("label", { title: window.shaperNote || "" }, "↓", down));
+  return el("tr", {}, name, el("td", { class: "why" }, ...why), el("td", {}, controls));
+}
+
+function renderPrograms() {
+  const q = $("pick-q").value.trim().toLowerCase();
+  const src = $("pick-src").value;
+  const shown = programs
+    .filter((p) => !q || [displayName(p), p.company || "", p.path].some((s) => s.toLowerCase().includes(q)))
+    .filter((p) => src === "all" || (src === "running" ? p.running : src === "seen" ? !!p.seen_day
+      : src === "firewall" ? p.firewall.length > 0 : !!p.rule))
+    .sort(byName);
+  $("pick-list").replaceChildren(...shown.map(pickRow));
+  $("pick-count").textContent = `${shown.length} of ${programs.length}`;
+}
+
+async function loadPrograms() {
+  try {
+    programs = await api("/api/programs");
+    renderPrograms();
+  } catch (e) {
+    $("pick-list").replaceChildren(el("tr", {}, el("td", { colspan: "3", class: "bad" }, e.message)));
+  }
+}
+
+$("picker-open").addEventListener("click", () => {
+  $("pick-list").replaceChildren(el("tr", {}, el("td", { colspan: "3", class: "muted" }, "Collecting programs…")));
+  $("picker").showModal();
+  $("pick-q").focus();
+  loadPrograms();
+});
+$("picker-close").addEventListener("click", () => $("picker").close());
+$("pick-q").addEventListener("input", renderPrograms);
+$("pick-src").addEventListener("change", renderPrograms);
+
 $("add-save").addEventListener("click", async () => {
   const path = $("add-path").value.trim().replace(/^"(.*)"$/, "$1");   // tolerate "Copy as path" quotes
   const kb = (id) => ($(id).value === "" ? null : Math.max(1, Math.round(+$(id).value * 1024)));
@@ -422,8 +518,8 @@ $("add-save").addEventListener("click", async () => {
   try {
     await api("/api/rule", { path, ...fwPatch($("add-fw").value), up_limit: kb("add-up"), down_limit: kb("add-down") });
     for (const id of ["add-path", "add-up", "add-down"]) $(id).value = "";
-    $("addform").classList.add("hidden");
     refresh();
+    loadPrograms();
   } catch (e) { alert(e.message); }
 });
 

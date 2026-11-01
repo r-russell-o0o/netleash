@@ -103,8 +103,20 @@ Options: `--port N`, `--data-dir DIR` (default `%ProgramData%\NetLeash`), `--ope
 Rules live in `rules.json` in the data directory and are re-applied at start.
 Each rule is per program (full `.exe` path) and can block outgoing connections,
 incoming connections or both, and set upload and download limits. Rules apply
-whether or not the program is running. Use **Add program…** for a program
-that isn't running. Paths may contain `*` and `?` wildcards, for example a Store
+whether or not the program is running.
+
+**Find programs…** lists every program with evidence of network use, so you
+can block or limit one without knowing where it's installed (`src/catalog.rs`).
+It reads three sources, all read-only:
+- NetLeash's usage history (up to 120 days)
+- processes with an open TCP/UDP socket right now
+- programs named in Windows Firewall rules, which most network programs add when
+  they're installed
+
+Each program is shown with the description and company from its version
+information ("Google Chrome · Google LLC"), and the main table uses those names
+too. Programs that aren't listed can still be added by typing their path at the
+bottom of the list. Paths may contain `*` and `?` wildcards, for example a Store
 app's version folder; they're re-checked every minute so updates stay covered.
 
 ### Importing from NetLimiter
@@ -259,6 +271,7 @@ src/enforce.rs  rules -> WFP + shaper (or QoS)
 src/shaper.rs   WinDivert token-bucket limiter (unit-tested buckets)
 src/windivert.rs  runtime-loaded WinDivert bindings + packet header parser
 src/conns.rs    connection tables, closing connections
+src/catalog.rs  "Find programs" list: history + running + firewall, version-info names
 src/nlimport.rs NetLimiter 5 settings importer (read-only, unit-tested)
 src/pathglob.rs wildcard program paths
 src/sys.rs      elevation, time, PID -> path, Ctrl+C

@@ -105,6 +105,8 @@ pub struct AppView {
     pub down_total: u64,
     pub history: Vec<(u64, u64)>,
     pub rule: Option<Rule>,
+    /// The program's own description ("Google Chrome"), filled in by the web layer.
+    pub description: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -266,6 +268,7 @@ impl State {
                     down_total: a.down_total,
                     history: a.history.iter().copied().collect(),
                     rule: g.rules.get(key).cloned(),
+                    description: None,
                 }
             })
             .collect();
@@ -328,6 +331,23 @@ impl State {
             g.rules.values().cloned().collect()
         };
         write_json(&self.data_dir.join("rules.json"), &all)
+    }
+
+    /// Every program in the usage history: (path, last day seen, total bytes).
+    pub fn usage_paths(&self) -> Vec<(String, String, u64)> {
+        let g = self.inner.lock().unwrap();
+        let mut seen: HashMap<String, (String, String, u64)> = HashMap::new();
+        // Days are sorted oldest first, so the last write per program wins.
+        for (day, programs) in &g.usage {
+            for (path, [up, down]) in programs {
+                let e = seen
+                    .entry(app_key(path))
+                    .or_insert_with(|| (path.clone(), day.clone(), 0));
+                e.1 = day.clone();
+                e.2 += up + down;
+            }
+        }
+        seen.into_values().collect()
     }
 
     pub fn usage_json(&self) -> String {

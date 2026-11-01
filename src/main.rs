@@ -2,6 +2,7 @@
 //! upload/download limiter for Windows. Monitoring and blocking use only
 //! mechanisms Windows ships with; limits use the WinDivert driver if present.
 
+mod catalog;
 mod conns;
 mod demo;
 mod enforce;
@@ -207,6 +208,19 @@ fn main() {
         });
     }
 
+    // Warm the program catalog's version-info cache in the background, so the
+    // "Find programs" list opens quickly the first time.
+    {
+        let (st, nm) = (state.clone(), names.clone());
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_secs(10));
+            let n = catalog::build(&st, &nm).len();
+            st.log(format!(
+                "program list ready ({n} programs that use the network)"
+            ));
+        });
+    }
+
     let url = format!("http://127.0.0.1:{}/", args.port);
     state.log(format!(
         "NetLeash {} — UI at {url} (data in {})",
@@ -216,7 +230,7 @@ fn main() {
     if args.open {
         let _ = std::process::Command::new("explorer.exe").arg(&url).spawn();
     }
-    if let Err(e) = web::serve(args.port, state.clone(), enforcer.clone()) {
+    if let Err(e) = web::serve(args.port, state.clone(), enforcer.clone(), names.clone()) {
         state.log(format!(
             "exiting: {e} (is another NetLeash already running?)"
         ));

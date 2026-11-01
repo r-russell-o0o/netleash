@@ -5,10 +5,12 @@
 //! rebinding) and every write needs a custom `X-NetLeash` header, which a
 //! cross-origin page cannot send without a CORS preflight we never approve.
 
+use crate::catalog;
 use crate::conns;
 use crate::enforce::Enforcer;
 use crate::nlimport;
 use crate::state::{Rule, State, app_key};
+use crate::sys::ProcessNames;
 use std::io::Read;
 use std::path::Path;
 use std::sync::Arc;
@@ -80,12 +82,28 @@ fn query_param(url: &str, key: &str) -> Option<String> {
         .map(|(_, v)| percent_decode(v))
 }
 
-pub fn serve(port: u16, state: Arc<State>, enforcer: Arc<Enforcer>) -> Result<(), String> {
+pub fn serve(
+    port: u16,
+    state: Arc<State>,
+    enforcer: Arc<Enforcer>,
+    names: Arc<ProcessNames>,
+) -> Result<(), String> {
     let server = Server::http(("127.0.0.1", port))
         .map_err(|e| format!("cannot listen on port {port}: {e}"))?;
     let allowed_hosts = [format!("127.0.0.1:{port}"), format!("localhost:{port}")];
     for mut req in server.incoming_requests() {
         let host_ok = header(&req, "Host").is_some_and(|h| allowed_hosts.iter().any(|a| a == h));
+        // Building the program catalog can take seconds the first time (it
+        // reads version info from every program's file); answer it on its own
+        // thread so the rest of the UI keeps updating meanwhile.
+        if host_ok && *req.method() == Method::Get && req.url() == "/api/programs" {
+            let (st, nm) = (state.clone(), names.clone());
+            std::thread::spawn(move || {
+                let body = serde_json::to_string(&catalog::build(&st, &nm)).unwrap();
+                let _ = req.respond(json(body));
+            });
+            continue;
+        }
         let resp = if !host_ok {
             error(403, "bad Host header")
         } else {
@@ -101,7 +119,13 @@ fn handle(req: &mut Request, state: &State, enforcer: &Enforcer) -> Reply {
     let path = url.split('?').next().unwrap_or("");
     match (req.method(), path) {
         (Method::Get, "/") => reply(200, "text/html; charset=utf-8", INDEX),
-        (Method::Get, "/api/state") => json(serde_json::to_string(&state.snapshot()).unwrap()),
+        (Method::Get, "/api/state") => {
+            let mut snap = state.snapshot();
+            for a in &mut snap.apps {
+                a.description = catalog::ver_info(&a.path).description;
+            }
+            json(serde_json::to_string(&snap).unwrap())
+        }
         (Method::Get, "/api/usage") => json(state.usage_json()),
         (Method::Get, "/api/connections") => {
             let Some(key) = query_param(&url, "app") else {
