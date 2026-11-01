@@ -178,7 +178,7 @@ not change Defender settings for you.
     $uninstKey = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\NetLeash'
     New-Item -Force $uninstKey | Out-Null
     $uninstall = "powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$InstallDir\uninstall.ps1`""
-    @{ DisplayName = 'NetLeash'; DisplayVersion = "$version"; Publisher = 'NetLeash (personal build)';
+    @{ DisplayName = 'NetLeash'; DisplayVersion = "$version"; Publisher = 'NetLeash';
        InstallLocation = $InstallDir; DisplayIcon = $exe; UninstallString = $uninstall; NoModify = 1; NoRepair = 1
     }.GetEnumerator() | ForEach-Object {
         $type = if ($_.Value -is [int]) { 'DWord' } else { 'String' }

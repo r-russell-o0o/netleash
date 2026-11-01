@@ -2,6 +2,12 @@
 name = "netleash"
 version = "0.1.0"
 edition = "2024"
+description = "Per-program network monitor, firewall and bandwidth limiter for Windows"
+license = "MIT"
+repository = "https://github.com/r-russell-o0o/netleash"
+readme = "README.md"
+# A Windows application, not a library: not for crates.io.
+publish = false
 
 [dependencies]
 roxmltree = "0.21.2"
