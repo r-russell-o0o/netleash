@@ -2,3 +2,5 @@
 /demo-data
 # Third-party binaries: fetch with fetch-windivert.ps1 (hash-checked)
 /vendor
+# Built packages (package.ps1)
+/dist

@@ -356,10 +356,32 @@ impl State {
         let line = format!("{} {}", crate::sys::local_time_hms(), msg.into());
         eprintln!("{line}");
         let mut g = self.inner.lock().unwrap();
+        // Also keep a file: started at boot there is no console to read.
+        // Written under the lock so lines from different threads don't interleave.
+        append_log(
+            &self.data_dir.join("netleash.log"),
+            &format!("{} {line}", crate::sys::local_date()),
+        );
         if g.log.len() >= 50 {
             g.log.pop_front();
         }
         g.log.push_back(line);
+    }
+}
+
+/// Append a line, keeping at most ~1 MB in `netleash.log` plus one older file.
+pub fn append_log(path: &PathBuf, line: &str) {
+    use std::io::Write;
+    if std::fs::metadata(path).is_ok_and(|m| m.len() > 1024 * 1024) {
+        let _ = std::fs::rename(path, path.with_extension("log.1"));
+    }
+    let _ = std::fs::create_dir_all(path.parent().unwrap_or(path));
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+    {
+        let _ = writeln!(f, "{line}");
     }
 }
 

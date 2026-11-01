@@ -126,7 +126,24 @@ fn main() {
                 .join("NetLeash")
         }
     });
-    let state = Arc::new(State::new(data_dir, args.demo));
+    let state = Arc::new(State::new(data_dir.clone(), args.demo));
+    {
+        // Record panics in the log file. Deliberately not via State::log: the
+        // panic may have happened while its lock was held.
+        let log = data_dir.join("netleash.log");
+        let default = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            state::append_log(
+                &log,
+                &format!(
+                    "{} {} PANIC: {info}",
+                    sys::local_date(),
+                    sys::local_time_hms()
+                ),
+            );
+            default(info);
+        }));
+    }
     let names = Arc::new(sys::ProcessNames::new());
     // Monitor
     if args.demo {
@@ -200,7 +217,9 @@ fn main() {
         let _ = std::process::Command::new("explorer.exe").arg(&url).spawn();
     }
     if let Err(e) = web::serve(args.port, state.clone(), enforcer.clone()) {
-        eprintln!("{e}");
+        state.log(format!(
+            "exiting: {e} (is another NetLeash already running?)"
+        ));
         if !args.demo {
             etw::stop();
         }

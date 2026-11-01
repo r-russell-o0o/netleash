@@ -20,7 +20,34 @@ present. Without it, NetLeash falls back to Windows QoS, which can limit uploads
 | Daily usage history | `usage.json`, 120 days (`src/state.rs`) | – |
 | Web UI | `http://127.0.0.1:5199`, single file `ui/index.html` | – |
 
-## Running
+## Installing (this PC or others)
+
+```powershell
+.\package.ps1          # runs the tests, builds dist\NetLeash-<version>.zip
+```
+
+Copy the zip to any 64-bit Windows 10/11 PC, unzip it, and double-click `Install.cmd`.
+The installer (`installer\install.ps1`):
+- copies `netleash.exe` to `C:\Program Files\NetLeash`
+- offers to install WinDivert. It asks first, because yes adds a Defender
+  exclusion for `C:\Program Files\NetLeash\windivert`. The driver is downloaded
+  and hash-checked, so the zip itself contains nothing for Defender to flag.
+  Use `-WinDivertZip FILE` for offline PCs.
+- registers the scheduled task **NetLeash**: it runs as SYSTEM at boot,
+  before anyone logs in. A second trigger fires every 5 minutes and restarts
+  NetLeash if it has stopped; while it's running that trigger does nothing.
+- locks `C:\ProgramData\NetLeash` so only Administrators can edit the rules
+- adds a **NetLeash** shortcut on the desktop and in the Start menu, and an
+  entry in Installed apps
+- checks that the UI actually answers, and shows the log if it doesn't
+
+Running the installer again upgrades in place, and your rules are kept. To uninstall,
+use Installed apps or `uninstall.ps1` (add `-RemoveData` to delete rules and history).
+Uninstalling removes the Defender exclusion too.
+
+Log file: `C:\ProgramData\NetLeash\netleash.log` (1 MB, plus one older file).
+
+## Running by hand (development)
 
 ```powershell
 # Explore the UI without admin rights: synthetic traffic, nothing on the system changes
