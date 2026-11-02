@@ -9,7 +9,8 @@ param(
 $ErrorActionPreference = 'Stop'
 $here = $PSScriptRoot
 $log = Join-Path $here 'results.txt'
-Set-Content $log "NetLeash driver test, $(Get-Date -Format s), $([Environment]::OSVersion.VersionString)"
+$rel = (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion' -ErrorAction SilentlyContinue).ReleaseId
+Set-Content $log "NetLeash driver test, $(Get-Date -Format s), $([Environment]::OSVersion.VersionString), release $rel"
 function Say($m, $color = 'Gray') { Write-Host $m -ForegroundColor $color; Add-Content $log $m }
 $fail = 0
 function Check($ok, $what) {
@@ -45,11 +46,25 @@ Say "unlimited before NetLeash: $base KB/s"
 
 # 3. NetLeash with the driver backend
 Remove-Item $data -Recurse -Force -ErrorAction SilentlyContinue
-$p = Start-Process $exe -ArgumentList '--limiter', 'driver', '--port', $port, '--data-dir', $data -PassThru -WindowStyle Minimized
-Start-Sleep 4
+$errlog = Join-Path $here 'netleash-stderr.txt'
+$p = Start-Process $exe -ArgumentList '--limiter', 'driver', '--port', $port, '--data-dir', $data -PassThru `
+    -NoNewWindow -RedirectStandardOutput (Join-Path $here 'netleash-stdout.txt') -RedirectStandardError $errlog
 $api = "http://127.0.0.1:$port"
 $hdr = @{ 'X-NetLeash' = '1' }
-$state = Invoke-RestMethod "$api/api/state"
+$state = $null
+for ($i = 0; $i -lt 30 -and -not $p.HasExited -and -not $state; $i++) {
+    Start-Sleep 1
+    try { $state = Invoke-RestMethod "$api/api/state" -TimeoutSec 2 } catch {}
+}
+if (-not $state) {
+    Check $false 'NetLeash starts and answers'
+    if ($p.HasExited) { Say "NetLeash exited with code $($p.ExitCode)" } else { Say 'NetLeash still running but not answering'; Stop-Process -Id $p.Id -Force }
+    Say '--- NetLeash error output ---'; if (Test-Path $errlog) { Say (Get-Content $errlog -Raw) }
+    Say '--- netleash.log ---'; $nl = Join-Path $data 'netleash.log'; if (Test-Path $nl) { Say (Get-Content $nl -Raw) }
+    sc.exe stop NetLeashLimiter | Out-Null
+    Say 'Stopping here. Send results.txt.'
+    exit 1
+}
 Say "NetLeash: limiter = $($state.status.limiter); downloads = $($state.status.shaper)"
 Check ($state.status.shaper -like 'ok (NetLeash driver)*') 'NetLeash uses the driver'
 
