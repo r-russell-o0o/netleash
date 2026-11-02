@@ -17,13 +17,29 @@ function Check($ok, $what) {
     if ($ok) { Say "PASS  $what" Green } else { Say "FAIL  $what" Red; $script:fail++ }
 }
 
+# On any error, don't leave NetLeash running: it would hold the driver.
+trap {
+    Say "ERROR  $_" Red
+    Get-Process netleash -ErrorAction SilentlyContinue | Stop-Process -Force
+    Say 'Stopped NetLeash. Send results.txt.'
+    break
+}
+
 $sys = Join-Path $here 'netleashlim.sys'
 $exe = Join-Path $here 'netleash.exe'
 $port = 5197
 $data = Join-Path $env:TEMP 'netleash-drivertest'
 
-# 1. Driver service
+# 1. Driver service. A NetLeash left over from an earlier run holds the driver
+# open, and Windows only unloads it once that handle is gone.
+Get-Process netleash -ErrorAction SilentlyContinue | Stop-Process -Force
+Start-Sleep 1
 sc.exe stop NetLeashLimiter 2>$null | Out-Null
+for ($i = 0; $i -lt 30 -and (sc.exe query NetLeashLimiter | Out-String) -match 'PENDING'; $i++) { Start-Sleep 1 }
+if ((sc.exe query NetLeashLimiter | Out-String) -match 'PENDING') {
+    Say 'The driver from the last run will not stop. Restart the VM and run this again.' Red
+    exit 1
+}
 sc.exe delete NetLeashLimiter 2>$null | Out-Null
 sc.exe create NetLeashLimiter type= kernel start= demand binPath= "$sys" | Out-Null
 sc.exe start NetLeashLimiter | Out-Null
