@@ -17,7 +17,7 @@ pub struct Enforcer {
     blocker: Mutex<Option<wfp::Blocker>>,
     shaper: Option<Shaper>,
     qos_ok: bool,
-    failing: Mutex<HashSet<(String, Way)>>,
+    failing: Mutex<HashSet<wfp::BlockKey>>,
     /// Wildcard patterns that matched nothing last time (logged once).
     unmatched: Mutex<HashSet<String>>,
 }
@@ -140,10 +140,10 @@ impl Enforcer {
         let mut wanted = Vec::new();
         for r in rules {
             if r.block_out {
-                wanted.push((r.path.clone(), Way::Out));
+                wanted.push((r.path.clone(), Way::Out, r.internet_only));
             }
             if r.block_in {
-                wanted.push((r.path.clone(), Way::In));
+                wanted.push((r.path.clone(), Way::In, r.internet_only));
             }
         }
         if let Some(b) = self.blocker.lock().unwrap().as_mut() {
@@ -151,7 +151,7 @@ impl Enforcer {
             // Blocks that fail (typically: the program isn't installed, or its
             // drive is offline) are retried on every change; report each once.
             let mut failing = self.failing.lock().unwrap();
-            let now_failing: HashSet<(String, Way)> =
+            let now_failing: HashSet<wfp::BlockKey> =
                 errors.iter().map(|(k, _)| k.clone()).collect();
             for (k, e) in errors {
                 if !failing.contains(&k) {
@@ -160,11 +160,11 @@ impl Enforcer {
             }
             *failing = now_failing;
             let mut quiet = 0;
-            for (path, way) in added {
+            for (path, way, internet_only) in added {
                 let pids = self.state.pids_of(&app_key(&path));
                 // Existing connections survive a new WFP block; end the outgoing ones.
                 let n = if way == Way::Out && !pids.is_empty() {
-                    conns::close_tcp4(&pids)
+                    conns::close_tcp4(&pids, internet_only)
                 } else {
                     0
                 };
@@ -173,12 +173,17 @@ impl Enforcer {
                     continue;
                 }
                 self.state.log(format!(
-                    "blocked {} {} ({n} open connection{} closed)",
+                    "blocked {} {}{} ({n} open connection{} closed)",
                     crate::state::file_name(&path),
                     if way == Way::Out {
                         "outbound"
                     } else {
                         "inbound"
+                    },
+                    if internet_only {
+                        " to the internet"
+                    } else {
+                        ""
                     },
                     if n == 1 { "" } else { "s" }
                 ));

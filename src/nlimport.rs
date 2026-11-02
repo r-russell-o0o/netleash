@@ -11,7 +11,8 @@
 //! | limit, direction Out/In/Both       | upload / download limit        |
 //! | Allow                              | skipped: NetLeash allows by default |
 //! | Ask                                | skipped: no ask mode yet       |
-//! | disabled rules, ignore rules, zone or address/port filters, Store apps | skipped, with the reason |
+//! | Deny on a program combined with the "Internet" zone | internet-only block (local network stays reachable) |
+//! | disabled rules, ignore rules, other zones, address/port filters, Store apps | skipped, with the reason |
 //!
 //! The file is only read, never written.
 
@@ -123,8 +124,36 @@ fn parse_filters(root: roxmltree::Node) -> HashMap<String, Filter> {
     out
 }
 
-/// Which app paths a filter selects, or why it can't be expressed per app.
-fn app_paths(filter: &Filter, all: &HashMap<String, Filter>) -> Result<Vec<String>, String> {
+/// NetLimiter's built-in "Internet" zone: one IsInternetTraffic condition.
+fn is_internet(f: &Filter) -> bool {
+    f.base.is_empty()
+        && !f.funcs.is_empty()
+        && f.funcs
+            .iter()
+            .all(|x| x.kind == "FFIsInternetTraffic" && x.matches)
+}
+
+/// Which app paths a filter selects and whether only their internet traffic,
+/// or why it can't be expressed per app.
+fn app_paths(
+    filter: &Filter,
+    all: &HashMap<String, Filter>,
+) -> Result<(Vec<String>, bool), String> {
+    // A program AND "Internet" (NetLimiter's usual composite).
+    if let [a, b] = filter.base.as_slice()
+        && let (Some(a), Some(b)) = (all.get(a), all.get(b))
+    {
+        let app = match (is_internet(a), is_internet(b)) {
+            (true, false) => Some(b),
+            (false, true) => Some(a),
+            _ => None,
+        };
+        if let Some(app) = app
+            && let Ok((paths, false)) = app_paths(app, all)
+        {
+            return Ok((paths, true));
+        }
+    }
     if !filter.base.is_empty() {
         let parts: Vec<String> = filter
             .base
@@ -165,7 +194,10 @@ fn app_paths(filter: &Filter, all: &HashMap<String, Filter>) -> Result<Vec<Strin
     if app.iter().any(|f| !f.matches) {
         return Err("matches every program *except* the listed one".into());
     }
-    Ok(app.iter().flat_map(|f| f.paths.iter().cloned()).collect())
+    Ok((
+        app.iter().flat_map(|f| f.paths.iter().cloned()).collect(),
+        false,
+    ))
 }
 
 /// Turn NetLimiter's settings XML into NetLeash rules (one per program).
@@ -235,13 +267,17 @@ pub fn parse(xml: &str) -> Result<(Vec<Rule>, Vec<Skipped>), String> {
             skip("its filter is missing from the file");
             continue;
         };
-        let paths = match app_paths(filter, &filters) {
+        let (paths, internet) = match app_paths(filter, &filters) {
             Ok(p) => p,
             Err(reason) => {
                 skip(&reason);
                 continue;
             }
         };
+        if internet && kind != "fwRule" {
+            skip("limits on internet traffic only aren't supported yet");
+            continue;
+        }
         let dir = text(r, "Dir");
         let (inbound, outbound) = match dir.as_str() {
             "In" => (true, false),
@@ -265,6 +301,9 @@ pub fn parse(xml: &str) -> Result<(Vec<Rule>, Vec<Skipped>), String> {
                 ..Default::default()
             });
             if kind == "fwRule" {
+                // One program, several Deny rules: a full block wins over an
+                // internet-only one (the stricter of the two).
+                e.internet_only = internet && (e.internet_only || !e.blocks_any());
                 e.block_in |= inbound;
                 e.block_out |= outbound;
             } else {
@@ -277,6 +316,7 @@ pub fn parse(xml: &str) -> Result<(Vec<Rule>, Vec<Skipped>), String> {
                 };
                 if bytes == 0 {
                     // NetLimiter's 0 B/s limit is effectively a block.
+                    e.internet_only &= !e.blocks_any();
                     e.block_in |= inbound;
                     e.block_out |= outbound;
                     continue;
@@ -339,6 +379,11 @@ pub fn merge(existing: Option<Rule>, imported: Rule) -> Rule {
     let Some(mut e) = existing else {
         return imported;
     };
+    e.internet_only = match (e.blocks_any(), imported.blocks_any()) {
+        (false, _) => imported.internet_only,
+        (true, false) => e.internet_only,
+        (true, true) => e.internet_only && imported.internet_only,
+    };
     e.block_in |= imported.block_in;
     e.block_out |= imported.block_out;
     e.up_limit = e.up_limit.or(imported.up_limit);
@@ -396,6 +441,10 @@ mod tests {
             Some(10_485_760)
         );
         assert_eq!(rules.len(), 4);
+        // launcher + "Internet" Deny Out: an internet-only outbound block.
+        let l = find(&rules, r"d:\games\launcher.exe");
+        assert!(l.block_out && !l.block_in && l.internet_only);
+        assert!(!g.internet_only);
 
         let reasons: Vec<&str> = skipped.iter().map(|s| s.reason.as_str()).collect();
         assert!(
@@ -413,12 +462,7 @@ mod tests {
                 .any(|r| r.contains("\"Internet\", not to specific programs"))
         );
         assert!(reasons.iter().any(|r| r.starts_with("ignore rules")));
-        assert_eq!(skipped.len(), 8);
-        assert!(
-            reasons
-                .iter()
-                .any(|r| r.contains("combines filters (launcher + Internet)"))
-        );
+        assert_eq!(skipped.len(), 7);
         assert!(
             skipped
                 .iter()

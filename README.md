@@ -24,7 +24,7 @@ driver when it's installed.
 |---|---|
 | Live traffic per program: rates, totals, last 60 s | ETW provider `Microsoft-Windows-Kernel-Network` (`src/etw.rs`) |
 | Open connections per program | IP Helper connection tables (`src/conns.rs`) |
-| Block a program: outgoing, incoming or both; works whether or not it's running | Windows Filtering Platform (`src/wfp.rs`) |
+| Block a program: outgoing, incoming or both, from everything or from the internet only; works whether or not it's running | Windows Filtering Platform (`src/wfp.rs`) |
 | Upload and download limits per program | WinDivert + a token bucket (`src/shaper.rs`) |
 | Upload limits without WinDivert | Windows Policy-based QoS (`src/qos.rs`) |
 | **Find programs**: every program that uses the network, by name, without knowing its path | usage history + open sockets + Windows Firewall rules (`src/catalog.rs`) |
@@ -99,8 +99,13 @@ contains no WinDivert files, so there's nothing in it for Defender to flag.
   15 minutes, plus every program that has a rule. Click a column title to sort,
   and a row to see its connections.
 - **Firewall** per program: *Allow*, *Block outgoing* (connections the program
-  makes), *Block incoming* (connections it accepts) or *Block all*. A new
-  block also closes the program's open IPv4 TCP connections.
+  makes), *Block incoming* (connections it accepts) or *Block all*, or the same
+  for the **internet only**: the program can still reach the local network
+  (printers, NAS, other PCs). A new block also closes the program's open IPv4
+  TCP connections (internet ones only, for an internet-only block).
+  **Limitation:** "local network" means the private address ranges (10.x,
+  172.16-31.x, 192.168.x, link-local, loopback, multicast; fc00::/7, fe80::/10).
+  A local network that uses public addresses counts as internet.
 - **Limits** are in KB/s (1 KB = 1024 bytes) for upload (↑) and download (↓).
 - **Find programs…** lists every program with evidence of network use, by its
   real name ("Google Chrome · Google LLC") and why it's listed: running now,
@@ -115,10 +120,11 @@ contains no WinDivert files, so there's nothing in it for Defender to flag.
   gone out. Asking *before* the first connection needs a kernel driver of our own.
 - **Import from NetLimiter…** reads NetLimiter 5's settings, only reads them,
   and previews the result before importing. Deny rules become blocks in the
-  same direction, and enabled per-program limits become limits. Everything else
-  is listed with the reason it can't be expressed: Allow and Ask rules, disabled
-  rules, zone rules ("Internet"), rules with address or port conditions, and
-  Store apps identified by package.
+  same direction, and enabled per-program limits become limits. A Deny rule on a
+  program combined with the "Internet" zone becomes an internet-only block.
+  Everything else is listed with the reason it can't be expressed: Allow and Ask
+  rules, disabled rules, other zone rules, rules with address or port conditions,
+  limits on internet traffic only, and Store apps identified by package.
 
 Files: rules in `C:\ProgramData\NetLeash\rules.json`, usage history in `usage.json`,
 and a log in `netleash.log` (1 MB, plus one older file).

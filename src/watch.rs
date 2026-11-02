@@ -288,6 +288,7 @@ pub fn decide(
                 path: a.path.clone(),
                 block_in: true,
                 block_out: true,
+                internet_only: false,
                 ..current.unwrap_or_default()
             },
             // Allowing only lifts a block that strict mode added; a rule the

@@ -176,6 +176,7 @@
     </div>
     <p class="muted">Click a column title to sort. Click a row to see its connections.
       "Block outgoing" stops connections the program makes; "Block incoming" stops connections it accepts.
+      "Block internet" leaves the local network (printers, NAS, other PCs at home) reachable.
       Limits are in KB/s (1 KB = 1024 bytes).</p>
   </section>
   <section id="tab-usage" class="hidden">
@@ -213,6 +214,7 @@
       <select id="add-fw">
         <option value="allow">Allow</option><option value="out">Block outgoing</option>
         <option value="in">Block incoming</option><option value="all" selected>Block all</option>
+        <option value="net_out">Block internet, outgoing</option><option value="net_in">Block internet, incoming</option><option value="net_all">Block internet (local network OK)</option>
       </select>
       <label class="muted">↑ <input type="number" id="add-up" min="1" placeholder="no limit" style="width:86px"></label>
       <label class="muted">↓ <input type="number" id="add-down" min="1" placeholder="no limit" style="width:86px"></label>
@@ -317,16 +319,23 @@ function kbInput(title, disabled, onSet) {
 }
 
 // Firewall setting <-> rule fields.
-const FW_LABEL = { allow: "Allow", out: "Block outgoing", in: "Block incoming", all: "Block all" };
+// "net_*": blocks for the internet only; the local network stays reachable.
+const FW_LABEL = { allow: "Allow", out: "Block outgoing", in: "Block incoming", all: "Block all",
+  net_out: "Block internet, outgoing", net_in: "Block internet, incoming", net_all: "Block internet (local network OK)" };
 function fwSelect() {
   return el("select", { class: "block", title: "Firewall" },
     ...Object.entries(FW_LABEL).map(([v, t]) => el("option", { value: v }, t)));
 }
 function fwValue(rule) {
   const i = !!(rule && rule.block_in), o = !!(rule && rule.block_out);
-  return i && o ? "all" : o ? "out" : i ? "in" : "allow";
+  const v = i && o ? "all" : o ? "out" : i ? "in" : "allow";
+  if (v === "allow" || !(rule && rule.internet_only)) return v;
+  return "net_" + v;
 }
-const fwPatch = (v) => ({ block_out: v === "out" || v === "all", block_in: v === "in" || v === "all" });
+const fwPatch = (v) => {
+  const b = v.replace("net_", "");
+  return { block_out: b === "out" || b === "all", block_in: b === "in" || b === "all", internet_only: v.startsWith("net_") };
+};
 
 function makeRow(app) {
   const r = { app };
@@ -372,7 +381,7 @@ function updateRow(r, a) {
   r.cells.forEach((c, i) => (c.textContent = vals[i]));
   if (document.activeElement !== r.block) r.block.value = fw;
   r.block.classList.toggle("on", fw === "all");
-  r.block.classList.toggle("part", fw === "in" || fw === "out");
+  r.block.classList.toggle("part", fw !== "allow" && fw !== "all");
   setInput(r.upIn, a.rule && a.rule.up_limit);
   setInput(r.downIn, a.rule && a.rule.down_limit);
   r.downIn.disabled = !window.shaper;
@@ -530,7 +539,7 @@ function pickRow(p) {
   const fw = fwSelect();
   fw.value = fwValue(p.rule);
   fw.classList.toggle("on", fw.value === "all");
-  fw.classList.toggle("part", fw.value === "in" || fw.value === "out");
+  fw.classList.toggle("part", fw.value !== "allow" && fw.value !== "all");
   fw.addEventListener("change", async () => {
     if (fw.value !== "allow" && !confirm(`${FW_LABEL[fw.value]} for ${displayName(p)}?`)) { fw.value = fwValue(p.rule); return; }
     await saveRule(p, fwPatch(fw.value));

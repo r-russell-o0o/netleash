@@ -31,6 +31,9 @@ pub struct Rule {
     /// Block connections the app accepts.
     #[serde(default)]
     pub block_in: bool,
+    /// Blocks apply to the internet only; the local network stays reachable.
+    #[serde(default)]
+    pub internet_only: bool,
     /// Legacy/shorthand input: `"block": true` means both directions.
     /// Folded into `block_in`/`block_out` by `normalize` and never saved.
     #[serde(default, skip_serializing)]

@@ -42,12 +42,13 @@ impl Way {
     }
 }
 
-pub type BlockKey = (String, Way);
+/// (app path, direction, internet only: the local network stays reachable)
+pub type BlockKey = (String, Way, bool);
 
 pub struct Blocker {
     engine: HANDLE,
-    /// (app path, direction) -> ids of the filters blocking it
-    filters: HashMap<(String, Way), Vec<u64>>,
+    /// block -> ids of the filters that make it
+    filters: HashMap<BlockKey, Vec<u64>>,
 }
 
 // The engine handle is only used behind a Mutex.
@@ -93,7 +94,7 @@ impl Blocker {
         })
     }
 
-    fn add_block(&self, path: &str, way: Way) -> Result<Vec<u64>, String> {
+    fn add_block(&self, path: &str, way: Way, internet_only: bool) -> Result<Vec<u64>, String> {
         let wpath = wide(path);
         let mut app_id: *mut FWP_BYTE_BLOB = std::ptr::null_mut();
         check("FwpmGetAppIdFromFileName0", unsafe {
@@ -101,32 +102,86 @@ impl Blocker {
         })
         .map_err(|e| format!("{e} for {path}"))?;
 
-        let mut cond: FWPM_FILTER_CONDITION0 = unsafe { std::mem::zeroed() };
-        cond.fieldKey = FWPM_CONDITION_ALE_APP_ID;
-        cond.matchType = FWP_MATCH_EQUAL;
-        cond.conditionValue.r#type = FWP_BYTE_BLOB_TYPE;
-        cond.conditionValue.Anonymous.byteBlob = app_id;
+        let mut app: FWPM_FILTER_CONDITION0 = unsafe { std::mem::zeroed() };
+        app.fieldKey = FWPM_CONDITION_ALE_APP_ID;
+        app.matchType = FWP_MATCH_EQUAL;
+        app.conditionValue.r#type = FWP_BYTE_BLOB_TYPE;
+        app.conditionValue.Anonymous.byteBlob = app_id;
 
-        let name = wide(&format!("NetLeash block {way:?} {path}"));
+        // Internet-only: a higher-weight permit for this app AND a local
+        // remote address. Conditions on the same field are ORed by WFP, so
+        // one filter covers every local range. The permit is soft: a block
+        // from Windows Firewall or another sublayer still wins.
+        let mut v4: Vec<FWP_V4_ADDR_AND_MASK> = crate::lan::V4
+            .iter()
+            .map(|&(a, p)| FWP_V4_ADDR_AND_MASK {
+                addr: u32::from(a),
+                mask: crate::lan::mask_v4(p),
+            })
+            .collect();
+        let mut v6: Vec<FWP_V6_ADDR_AND_MASK> = crate::lan::V6
+            .iter()
+            .map(|&(a, p)| FWP_V6_ADDR_AND_MASK {
+                addr: a.octets(),
+                prefixLength: p,
+            })
+            .collect();
+        let remote = |ty, set: &mut dyn FnMut(&mut FWP_CONDITION_VALUE0)| {
+            let mut c: FWPM_FILTER_CONDITION0 = unsafe { std::mem::zeroed() };
+            c.fieldKey = FWPM_CONDITION_IP_REMOTE_ADDRESS;
+            c.matchType = FWP_MATCH_EQUAL;
+            c.conditionValue.r#type = ty;
+            set(&mut c.conditionValue);
+            c
+        };
+        let mut local_v4: Vec<FWPM_FILTER_CONDITION0> = vec![app];
+        for m in v4.iter_mut() {
+            local_v4.push(remote(FWP_V4_ADDR_MASK, &mut |v| {
+                v.Anonymous.v4AddrMask = m
+            }));
+        }
+        let mut local_v6: Vec<FWPM_FILTER_CONDITION0> = vec![app];
+        for m in v6.iter_mut() {
+            local_v6.push(remote(FWP_V6_ADDR_MASK, &mut |v| {
+                v.Anonymous.v6AddrMask = m
+            }));
+        }
+
+        let name = wide(&format!(
+            "NetLeash block {way:?}{} {path}",
+            if internet_only { " internet" } else { "" }
+        ));
         let mut ids = Vec::new();
         let mut result = Ok(());
-        for layer in way.layers() {
-            let mut f: FWPM_FILTER0 = unsafe { std::mem::zeroed() };
-            f.displayData.name = name.as_ptr() as *mut _;
-            f.layerKey = layer;
-            f.subLayerKey = SUBLAYER;
-            f.weight.r#type = FWP_EMPTY; // let the engine pick
-            f.numFilterConditions = 1;
-            f.filterCondition = &mut cond;
-            f.action.r#type = FWP_ACTION_BLOCK;
-            let mut id = 0u64;
-            result = check("FwpmFilterAdd0", unsafe {
-                FwpmFilterAdd0(self.engine, &f, std::ptr::null_mut(), &mut id)
-            });
+        // way.layers() is [IPv4, IPv6].
+        for (layer, local) in way.layers().into_iter().zip([&mut local_v4, &mut local_v6]) {
+            let mut wanted: Vec<(u32, u8, &mut [FWPM_FILTER_CONDITION0])> =
+                vec![(FWP_ACTION_BLOCK, 1, std::slice::from_mut(&mut app))];
+            if internet_only {
+                wanted.push((FWP_ACTION_PERMIT, 2, local.as_mut_slice()));
+            }
+            for (action, weight, conds) in wanted {
+                let mut f: FWPM_FILTER0 = unsafe { std::mem::zeroed() };
+                f.displayData.name = name.as_ptr() as *mut _;
+                f.layerKey = layer;
+                f.subLayerKey = SUBLAYER;
+                f.weight.r#type = FWP_UINT8;
+                f.weight.Anonymous.uint8 = weight;
+                f.numFilterConditions = conds.len() as u32;
+                f.filterCondition = conds.as_mut_ptr();
+                f.action.r#type = action;
+                let mut id = 0u64;
+                result = check("FwpmFilterAdd0", unsafe {
+                    FwpmFilterAdd0(self.engine, &f, std::ptr::null_mut(), &mut id)
+                });
+                if result.is_err() {
+                    break;
+                }
+                ids.push(id);
+            }
             if result.is_err() {
                 break;
             }
-            ids.push(id);
         }
         unsafe { FwpmFreeMemory0(&mut app_id as *mut _ as *mut *mut core::ffi::c_void) };
         if let Err(e) = result {
@@ -141,9 +196,9 @@ impl Blocker {
     /// Make the set of blocks equal `wanted`. Returns the blocks newly added
     /// (so the caller can close open connections) and per-block errors.
     /// A block works whether or not the app is running.
-    pub fn sync(&mut self, wanted: &[(String, Way)]) -> (Vec<BlockKey>, Vec<(BlockKey, String)>) {
+    pub fn sync(&mut self, wanted: &[BlockKey]) -> (Vec<BlockKey>, Vec<(BlockKey, String)>) {
         let mut errors = Vec::new();
-        let gone: Vec<(String, Way)> = self
+        let gone: Vec<BlockKey> = self
             .filters
             .keys()
             .filter(|k| !wanted.contains(k))
@@ -163,7 +218,7 @@ impl Blocker {
             if self.filters.contains_key(k) {
                 continue;
             }
-            match self.add_block(&k.0, k.1) {
+            match self.add_block(&k.0, k.1, k.2) {
                 Ok(ids) => {
                     self.filters.insert(k.clone(), ids);
                     added.push(k.clone());
@@ -179,5 +234,61 @@ impl Drop for Blocker {
     fn drop(&mut self) {
         // Closing a dynamic session removes all of its filters.
         unsafe { FwpmEngineClose0(self.engine) };
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::process::Command;
+
+    /// Exit code of a curl copy fetching `url` (0 = connected).
+    fn curl(exe: &std::path::Path, url: &str) -> i32 {
+        Command::new(exe)
+            .args(["-s", "-o", "NUL", "--max-time", "5", url])
+            .status()
+            .map_or(-1, |s| s.code().unwrap_or(-1))
+    }
+
+    /// Needs admin and internet: `cargo test -- --ignored real_filters`
+    #[test]
+    #[ignore]
+    fn real_filters() {
+        let exe = std::env::temp_dir().join("netleash-wfp-test.exe");
+        std::fs::copy(r"C:\Windows\System32\curl.exe", &exe).unwrap();
+        let path = exe.display().to_string();
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let local = format!("http://{}/", listener.local_addr().unwrap());
+        std::thread::spawn(move || {
+            use std::io::{Read, Write};
+            for mut s in listener.incoming().flatten() {
+                let _ = s.read(&mut [0; 1024]);
+                let _ = s.write_all(b"HTTP/1.0 200 OK\r\nContent-Length: 0\r\n\r\n");
+            }
+        });
+        let internet = "https://example.com/";
+        assert_eq!(curl(&exe, &local), 0, "local, no block");
+        assert_eq!(curl(&exe, internet), 0, "internet, no block");
+
+        let mut b = Blocker::open().expect("run elevated");
+        let (_, errs) = b.sync(&[(path.clone(), Way::Out, true)]);
+        assert!(errs.is_empty(), "{errs:?}");
+        assert_eq!(
+            curl(&exe, &local),
+            0,
+            "internet-only block: local still works"
+        );
+        assert_ne!(
+            curl(&exe, internet),
+            0,
+            "internet-only block: internet blocked"
+        );
+
+        let (_, errs) = b.sync(&[(path.clone(), Way::Out, false)]);
+        assert!(errs.is_empty(), "{errs:?}");
+        assert_ne!(curl(&exe, &local), 0, "full block: local blocked too");
+
+        b.sync(&[]);
+        assert_eq!(curl(&exe, internet), 0, "unblocked again");
     }
 }

@@ -7,6 +7,7 @@ mod conns;
 mod demo;
 mod enforce;
 mod etw;
+mod lan;
 mod nlimport;
 mod pathglob;
 mod qos;
