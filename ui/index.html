@@ -83,6 +83,14 @@
   dialog table td, dialog table th { padding: 4px 8px; font-size: 12px; }
   dialog details { margin: 4px 0; } dialog summary { cursor: pointer; }
   .warn { color: var(--warn); } .bad { color: var(--bad); }
+  .newprog { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; margin-bottom: 10px; }
+  .newprog.has { border-color: var(--warn); box-shadow: inset 3px 0 0 var(--warn); }
+  .np-head { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+  .np-row { display: flex; gap: 8px; align-items: center; padding: 8px 0 4px; border-top: 1px solid var(--line); margin-top: 8px; }
+  .np-name { flex: 1; min-width: 0; }
+  .np-name small { display: block; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tag.bad { color: var(--bad); border-color: var(--bad); }
+  button.act.danger { border-color: var(--bad); color: var(--bad); }
   #picker { width: min(1180px, calc(100vw - 32px)); }
   #picker td.name small { max-width: 420px; }
   #picker td.why { white-space: normal; min-width: 160px; max-width: 280px; }
@@ -129,6 +137,20 @@
       </ol>
       <span class="muted" id="wd-detail"></span>
       <button class="act" id="wd-hide" style="margin-top:6px">Hide</button>
+    </div>
+    <div class="newprog" id="alerts">
+      <div class="np-head">
+        <b>New programs</b>
+        <select id="np-mode" title="What to do when a program uses the network for the first time">
+          <option value="notify">Notify me</option>
+          <option value="block">Block them until I allow them</option>
+          <option value="off">Don't watch</option>
+        </select>
+        <span class="muted" id="np-count"></span>
+        <span style="flex:1"></span>
+        <button class="act hidden" id="np-allow-all">Allow all</button>
+      </div>
+      <div id="np-list"></div>
     </div>
     <div class="toolbar">
       <input type="search" id="filter" placeholder="Filter by name or path">
@@ -446,6 +468,46 @@ function renderApps(apps) {
 }
 
 $("wd-hide").addEventListener("click", () => { remember("wdHidden", true); $("wd-banner").classList.add("hidden"); });
+
+// ---- new-program alerts ------------------------------------------------------------
+function ago(unix) {
+  const s = Math.max(0, Math.round(Date.now() / 1000 - unix));
+  return s < 60 ? "just now" : s < 3600 ? `${Math.round(s / 60)} min ago` : s < 86400 ? `${Math.round(s / 3600)} h ago`
+    : `${Math.round(s / 86400)} days ago`;
+}
+
+async function decideAlert(action, key) {
+  try { await api("/api/alerts", { action, key: key || "" }); } catch (e) { alert(e.message); }
+  loadAlerts(); refresh();
+}
+
+async function loadAlerts() {
+  let data;
+  try { data = await api("/api/alerts"); } catch { return; }
+  if (document.activeElement !== $("np-mode")) $("np-mode").value = data.mode;
+  const n = data.alerts.length;
+  $("np-count").textContent = n ? `${n} waiting for your decision` : "· none waiting";
+  $("np-allow-all").classList.toggle("hidden", n < 2);
+  $("alerts").classList.toggle("has", n > 0);
+  $("np-list").replaceChildren(...data.alerts.map((a) => el("div", { class: "np-row" },
+    el("div", { class: "np-name" }, el("b", {}, a.name),
+      a.auto_blocked ? el("span", { class: "tag bad" }, "blocked until you allow it") : "",
+      el("small", { title: a.path }, `${a.path}  ·  first seen ${ago(a.first_seen)}`)),
+    el("button", { class: "act", onclick: () => decideAlert("allow", a.key) }, "Allow"),
+    el("button", { class: "act danger", onclick: () => {
+      if (confirm(`Block all network access for ${a.name}?`)) decideAlert("block", a.key);
+    } }, "Block"))));
+  if (location.hash === "#alerts" && n) $("alerts").scrollIntoView({ block: "start" });
+}
+$("np-mode").addEventListener("change", async () => {
+  try { await api("/api/watch", { mode: $("np-mode").value }); } catch (e) { alert(e.message); }
+  loadAlerts();
+});
+$("np-allow-all").addEventListener("click", () => {
+  if (confirm("Allow all listed programs?")) decideAlert("allow_all");
+});
+loadAlerts();
+setInterval(loadAlerts, 3000);
 
 // ---- program picker --------------------------------------------------------------
 let programs = [];

@@ -5,6 +5,7 @@
 use crate::conns;
 use crate::state::{Dir, State, app_key};
 use crate::sys::ProcessNames;
+use crate::watch::Watch;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
@@ -23,7 +24,7 @@ impl Rng {
     }
 }
 
-pub fn spawn(state: Arc<State>, names: Arc<ProcessNames>) {
+pub fn spawn(state: Arc<State>, names: Arc<ProcessNames>, watch: Arc<Watch>) {
     std::thread::spawn(move || {
         let mut rng = Rng(0x9e37_79b9_7f4a_7c15 ^ std::process::id() as u64);
         // Per-pid (up, down) "intent" in bytes/s that drifts over time.
@@ -65,6 +66,7 @@ pub fn spawn(state: Arc<State>, names: Arc<ProcessNames>) {
                         down = down.min(cap / 10);
                     }
                 }
+                watch.observe(&path);
                 if up > 0 {
                     state.record(&path, pid, Dir::Up, up);
                 }

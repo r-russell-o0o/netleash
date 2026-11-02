@@ -11,6 +11,7 @@ use crate::enforce::Enforcer;
 use crate::nlimport;
 use crate::state::{Rule, State, app_key};
 use crate::sys::ProcessNames;
+use crate::watch::{self, Decision, Mode, Watch};
 use std::io::Read;
 use std::path::Path;
 use std::sync::Arc;
@@ -87,6 +88,7 @@ pub fn serve(
     state: Arc<State>,
     enforcer: Arc<Enforcer>,
     names: Arc<ProcessNames>,
+    watch: Arc<Watch>,
 ) -> Result<(), String> {
     let server = Server::http(("127.0.0.1", port))
         .map_err(|e| format!("cannot listen on port {port}: {e}"))?;
@@ -107,14 +109,14 @@ pub fn serve(
         let resp = if !host_ok {
             error(403, "bad Host header")
         } else {
-            handle(&mut req, &state, &enforcer)
+            handle(&mut req, &state, &enforcer, &watch)
         };
         let _ = req.respond(resp);
     }
     Ok(())
 }
 
-fn handle(req: &mut Request, state: &State, enforcer: &Enforcer) -> Reply {
+fn handle(req: &mut Request, state: &State, enforcer: &Enforcer, watch: &Watch) -> Reply {
     let url = req.url().to_string();
     let path = url.split('?').next().unwrap_or("");
     match (req.method(), path) {
@@ -127,6 +129,59 @@ fn handle(req: &mut Request, state: &State, enforcer: &Enforcer) -> Reply {
             json(serde_json::to_string(&snap).unwrap())
         }
         (Method::Get, "/api/usage") => json(state.usage_json()),
+        (Method::Get, "/api/alerts") => {
+            let (alerts, seq) = watch.alerts();
+            json(
+                serde_json::json!({ "mode": watch.mode(), "seq": seq, "alerts": alerts })
+                    .to_string(),
+            )
+        }
+        // Compact status for the tray helper: speeds plus alerts newer than `since`.
+        (Method::Get, "/api/tray") => {
+            let since: u64 = query_param(&url, "since")
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(0);
+            let snap = state.snapshot();
+            let (alerts, seq) = watch.alerts();
+            let new: Vec<_> = alerts.iter().filter(|a| a.seq > since).take(5).collect();
+            json(
+                serde_json::json!({
+                    "down_rate": snap.down_rate, "up_rate": snap.up_rate, "seq": seq,
+                    "open_alerts": alerts.len(), "new": new, "mode": watch.mode(),
+                })
+                .to_string(),
+            )
+        }
+        (Method::Post, "/api/alerts") => {
+            #[derive(serde::Deserialize)]
+            struct Body {
+                action: Decision,
+                #[serde(default)]
+                key: String,
+            }
+            let b: Body = match read_json_body(req) {
+                Ok(b) => b,
+                Err(resp) => return resp,
+            };
+            match watch::decide(watch, state, enforcer, &b.key, b.action) {
+                Ok(()) => json(r#"{"ok":true}"#.into()),
+                Err(e) => error(400, &e),
+            }
+        }
+        (Method::Post, "/api/watch") => {
+            #[derive(serde::Deserialize)]
+            struct Body {
+                mode: Mode,
+            }
+            let b: Body = match read_json_body(req) {
+                Ok(b) => b,
+                Err(resp) => return resp,
+            };
+            watch.set_mode(b.mode);
+            watch.flush();
+            state.log(format!("new-program mode: {:?}", b.mode));
+            json(r#"{"ok":true}"#.into())
+        }
         (Method::Get, "/api/connections") => {
             let Some(key) = query_param(&url, "app") else {
                 return error(400, "missing app");

@@ -13,6 +13,7 @@ mod qos;
 mod shaper;
 mod state;
 mod sys;
+mod watch;
 mod web;
 mod wfp;
 mod windivert;
@@ -146,18 +147,30 @@ fn main() {
         }));
     }
     let names = Arc::new(sys::ProcessNames::new());
+    // New-program alerts. On the very first run, programs already in use are
+    // learned silently for a while (NETLEASH_LEARN_SECS overrides, for tests).
+    let learn = std::env::var("NETLEASH_LEARN_SECS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(600);
+    let watch = Arc::new(watch::Watch::new(
+        state.data_dir(),
+        Duration::from_secs(learn),
+    ));
     // Monitor
     if args.demo {
         state.set_status(|s| s.monitor = "demo (synthetic traffic on real processes)".into());
-        demo::spawn(state.clone(), names.clone());
+        demo::spawn(state.clone(), names.clone(), watch.clone());
     } else {
         etw::stop(); // a session left behind by a previous crash
-        let (st, nm) = (state.clone(), names.clone());
+        let (st, nm, wt) = (state.clone(), names.clone(), watch.clone());
         let started = etw::start(move |ev| {
             if ev.remote.is_loopback() {
                 return; // local IPC is not network traffic
             }
-            st.record(&nm.resolve(ev.pid), ev.pid, ev.dir, ev.bytes as u64);
+            let path = nm.resolve(ev.pid);
+            st.record(&path, ev.pid, ev.dir, ev.bytes as u64);
+            wt.observe(&path);
         });
         match started {
             Ok(()) => state.set_status(|s| s.monitor = "ok (ETW Kernel-Network)".into()),
@@ -191,7 +204,7 @@ fn main() {
     // One-second clock for rates; every minute, save usage and re-expand
     // wildcard rules.
     {
-        let (st, en) = (state.clone(), enforcer.clone());
+        let (st, en, wt) = (state.clone(), enforcer.clone(), watch.clone());
         std::thread::spawn(move || {
             let mut next = Instant::now() + Duration::from_secs(1);
             let mut n = 0u64;
@@ -199,6 +212,7 @@ fn main() {
                 std::thread::sleep(next.saturating_duration_since(Instant::now()));
                 next += Duration::from_secs(1);
                 st.tick(&sys::local_date());
+                watch::process(&wt, &st, &en);
                 n += 1;
                 if n.is_multiple_of(60) {
                     st.flush_usage();
@@ -211,10 +225,16 @@ fn main() {
     // Warm the program catalog's version-info cache in the background, so the
     // "Find programs" list opens quickly the first time.
     {
-        let (st, nm) = (state.clone(), names.clone());
+        let (st, nm, wt) = (state.clone(), names.clone(), watch.clone());
         std::thread::spawn(move || {
             std::thread::sleep(Duration::from_secs(10));
-            let n = catalog::build(&st, &nm).len();
+            let programs = catalog::build(&st, &nm);
+            if wt.first_run {
+                // Programs that already use the network are not "new".
+                wt.seed(programs.iter().map(|p| p.path.as_str()));
+                wt.flush();
+            }
+            let n = programs.len();
             st.log(format!(
                 "program list ready ({n} programs that use the network)"
             ));
@@ -230,7 +250,13 @@ fn main() {
     if args.open {
         let _ = std::process::Command::new("explorer.exe").arg(&url).spawn();
     }
-    if let Err(e) = web::serve(args.port, state.clone(), enforcer.clone(), names.clone()) {
+    if let Err(e) = web::serve(
+        args.port,
+        state.clone(),
+        enforcer.clone(),
+        names.clone(),
+        watch.clone(),
+    ) {
         state.log(format!(
             "exiting: {e} (is another NetLeash already running?)"
         ));
