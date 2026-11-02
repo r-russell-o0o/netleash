@@ -40,6 +40,9 @@ pub struct Plan {
     /// kept (the program may be installed later or on a drive that is offline);
     /// Windows can only enforce a block once the file exists.
     pub missing_files: Vec<String>,
+    /// Rules imported with a wider reach than in the source (e.g. a Windows
+    /// Firewall block for Public networks now blocks on every network).
+    pub widened: Vec<String>,
 }
 
 struct Func {
@@ -376,6 +379,7 @@ pub fn finish(source: String, mut rules: Vec<Rule>, skipped: Vec<Skipped>) -> Pl
         rules,
         skipped,
         missing_files,
+        widened: Vec::new(),
     }
 }
 

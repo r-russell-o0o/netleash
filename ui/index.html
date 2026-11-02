@@ -711,6 +711,12 @@ function renderPlan(plan, applied) {
       "(uninstalled, or on a drive that isn't connected). Their rules are kept, but Windows can only enforce " +
       "a block once the file exists; NetLeash retries whenever rules change or it restarts."));
   }
+  if (plan.widened && plan.widened.length) {
+    out.push(el("p", { class: "warn" }, `${plan.widened.length} of these Windows Firewall rules apply only to some network types ` +
+      "(for example Public). NetLeash has no network types, so they block on every network. To allow a program again " +
+      "on your home network, set it to Allow or \"Block internet\" after importing."));
+    out.push(el("details", {}, el("summary", {}, "Show them"), el("ul", {}, ...plan.widened.map((w) => el("li", {}, w)))));
+  }
   const groups = new Map();
   for (const s of plan.skipped) { if (!groups.has(s.reason)) groups.set(s.reason, []); groups.get(s.reason).push(s.what); }
   out.push(el("h3", {}, `${plan.skipped.length} ${IMPORT_SOURCES[importSource].name} rules not imported`));
