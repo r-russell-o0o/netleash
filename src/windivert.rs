@@ -223,6 +223,29 @@ impl Drop for Handle {
 /// `(protocol, source port, destination port)`. Fragments and other
 /// protocols return `None` and are passed through untouched.
 pub fn ports(p: &[u8]) -> Option<(u8, u16, u16)> {
+    let (proto, off) = transport(p)?;
+    let sport = u16::from_be_bytes([*p.get(off)?, *p.get(off + 1)?]);
+    let dport = u16::from_be_bytes([*p.get(off + 2)?, *p.get(off + 3)?]);
+    Some((proto, sport, dport))
+}
+
+/// A TCP packet that carries no data and doesn't end the connection: an
+/// acknowledgement or a handshake step. Holding these back in a limit's queue
+/// would slow the other direction (the ACKs of an upload arrive as download).
+pub fn is_bare_tcp(p: &[u8]) -> bool {
+    let Some((6, off)) = transport(p) else {
+        return false;
+    };
+    let (Some(&doff), Some(&flags)) = (p.get(off + 12), p.get(off + 13)) else {
+        return false;
+    };
+    const FIN: u8 = 0x01;
+    const RST: u8 = 0x04;
+    p.len() <= off + (doff >> 4) as usize * 4 && flags & (FIN | RST) == 0
+}
+
+/// Protocol number and header offset of a TCP or UDP packet's transport header.
+fn transport(p: &[u8]) -> Option<(u8, usize)> {
     let (mut proto, mut off) = match p.first()? >> 4 {
         4 => {
             let ihl = (p[0] & 0x0F) as usize * 4;
@@ -252,9 +275,7 @@ pub fn ports(p: &[u8]) -> Option<(u8, u16, u16)> {
     if proto != 6 && proto != 17 {
         return None;
     }
-    let sport = u16::from_be_bytes([*p.get(off)?, *p.get(off + 1)?]);
-    let dport = u16::from_be_bytes([*p.get(off + 2)?, *p.get(off + 3)?]);
-    Some((proto, sport, dport))
+    Some((proto, off))
 }
 
 #[cfg(test)]

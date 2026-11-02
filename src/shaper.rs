@@ -107,6 +107,9 @@ impl Bucket {
     pub fn admit(&mut self, packet: &[u8], addr: &Address, now: Instant) -> Verdict {
         self.refill(now);
         let len = packet.len();
+        if wd::is_bare_tcp(packet) {
+            return Verdict::Pass; // no data to limit; delaying it slows the other direction
+        }
         if self.queued_bytes == 0 && self.fits(len) {
             self.tokens -= len as f64;
             return Verdict::Pass;
@@ -471,7 +474,24 @@ mod tests {
         p[9] = 6;
         p[20..22].copy_from_slice(&sport.to_be_bytes());
         p[22..24].copy_from_slice(&443u16.to_be_bytes());
+        p[32] = 5 << 4; // 20-byte TCP header
+        p[33] = 0x10; // ACK
         p
+    }
+
+    #[test]
+    fn acks_without_data_are_never_held() {
+        let t0 = Instant::now();
+        let addr = Address::zeroed();
+        let mut b = Bucket::new(10_000, t0);
+        b.admit(&tcp(1), &addr, t0);
+        b.admit(&tcp(1), &addr, t0);
+        assert!(matches!(b.admit(&tcp(1), &addr, t0), Verdict::Queued));
+        let ack = &tcp(2)[..40];
+        assert!(matches!(b.admit(ack, &addr, t0), Verdict::Pass));
+        let mut fin = ack.to_vec();
+        fin[33] |= 0x01; // must not overtake the data queued before it
+        assert!(matches!(b.admit(&fin, &addr, t0), Verdict::Queued));
     }
 
     fn sport(p: &[u8]) -> u16 {
