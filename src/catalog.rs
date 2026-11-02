@@ -119,7 +119,7 @@ pub fn ver_info(path: &str) -> VerInfo {
 
 // ---- Windows Firewall rules ------------------------------------------------------
 
-fn expand_env(s: &str) -> String {
+pub fn expand_env(s: &str) -> String {
     if !s.contains('%') {
         return s.to_string();
     }
@@ -155,17 +155,20 @@ pub fn parse_firewall_rule(rule: &str) -> Option<(String, String)> {
     ))
 }
 
-/// Program paths in Windows Firewall rules, with their rule labels.
-/// Reading this key needs Administrator rights; without them it's empty.
-fn firewall_programs() -> HashMap<String, (String, Vec<String>)> {
-    let mut out: HashMap<String, (String, Vec<String>)> = HashMap::new();
+/// Every rule stored in Windows Firewall's registry key, as raw
+/// `v2.33|Action=...|` strings. Reading the key needs Administrator rights.
+pub fn firewall_rule_strings() -> Result<Vec<String>, String> {
     let sub = wide(
         r"SYSTEM\CurrentControlSet\Services\SharedAccess\Parameters\FirewallPolicy\FirewallRules",
     );
     let mut key: HKEY = std::ptr::null_mut();
-    if unsafe { RegOpenKeyExW(HKEY_LOCAL_MACHINE, sub.as_ptr(), 0, KEY_READ, &mut key) } != 0 {
-        return out;
+    let rc = unsafe { RegOpenKeyExW(HKEY_LOCAL_MACHINE, sub.as_ptr(), 0, KEY_READ, &mut key) };
+    if rc != 0 {
+        return Err(format!(
+            "could not open Windows Firewall's rules in the registry (error {rc}; needs Administrator rights)"
+        ));
     }
+    let mut out = Vec::new();
     let mut name = vec![0u16; 512];
     let mut data = vec![0u8; 16 * 1024];
     for index in 0.. {
@@ -199,8 +202,22 @@ fn firewall_programs() -> HashMap<String, (String, Vec<String>)> {
             .iter()
             .map(|c| u16::from_le_bytes([c[0], c[1]]))
             .collect();
-        let text = String::from_utf16_lossy(&units);
-        if let Some((app, label)) = parse_firewall_rule(text.trim_end_matches('\0')) {
+        out.push(
+            String::from_utf16_lossy(&units)
+                .trim_end_matches('\0')
+                .to_string(),
+        );
+    }
+    unsafe { RegCloseKey(key) };
+    Ok(out)
+}
+
+/// Program paths in Windows Firewall rules, with their rule labels.
+/// Without Administrator rights this is empty.
+fn firewall_programs() -> HashMap<String, (String, Vec<String>)> {
+    let mut out: HashMap<String, (String, Vec<String>)> = HashMap::new();
+    for text in firewall_rule_strings().unwrap_or_default() {
+        if let Some((app, label)) = parse_firewall_rule(&text) {
             let path = expand_env(&app);
             let e = out
                 .entry(app_key(&path))
@@ -210,7 +227,6 @@ fn firewall_programs() -> HashMap<String, (String, Vec<String>)> {
             }
         }
     }
-    unsafe { RegCloseKey(key) };
     out
 }
 

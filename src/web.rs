@@ -8,8 +8,10 @@
 use crate::catalog;
 use crate::conns;
 use crate::enforce::Enforcer;
+use crate::fwimport;
 use crate::nlimport;
 use crate::state::{Rule, State, app_key};
+use crate::swimport;
 use crate::sys::ProcessNames;
 use crate::watch::{self, Decision, Mode, Watch};
 use std::io::Read;
@@ -217,31 +219,84 @@ fn handle(req: &mut Request, state: &State, enforcer: &Enforcer, watch: &Watch) 
             };
             let source = opts.path.unwrap_or_else(|| nlimport::DEFAULT_PATH.into());
             // Only NetLimiter-style XML files; this endpoint must not become a file reader.
-            if !source.to_lowercase().ends_with(".xml") || !Path::new(&source).is_absolute() {
+            if !is_xml_path(&source) {
                 return error(400, "give the full path of NetLimiter's nl_settings.xml");
             }
-            let plan = match nlimport::plan(Path::new(&source)) {
-                Ok(p) => p,
-                Err(e) => return error(400, &e),
+            import(
+                state,
+                enforcer,
+                nlimport::plan(Path::new(&source)),
+                opts.apply,
+            )
+        }
+        (Method::Post, "/api/import/simplewall") => {
+            let opts: ImportOpts = match read_json_body(req) {
+                Ok(o) => o,
+                Err(resp) => return resp,
             };
-            if opts.apply {
-                let merged: Vec<Rule> = plan
-                    .rules
-                    .iter()
-                    .filter(|r| validate(r).is_ok())
-                    .map(|r| nlimport::merge(state.rule_for(&app_key(&r.path)), r.clone()))
-                    .collect();
-                let n = merged.len();
-                if let Err(e) = state.set_rules(merged) {
-                    return error(500, &format!("could not save rules: {e}"));
-                }
-                state.log(format!("imported {n} rules from {}", plan.source));
-                enforcer.apply();
+            let source = match opts.path.filter(|p| !p.trim().is_empty()) {
+                Some(p) => p,
+                None => match swimport::default_path() {
+                    Some(p) => p.display().to_string(),
+                    None => {
+                        return error(
+                            400,
+                            "simplewall's profile.xml wasn't found; give its full path",
+                        );
+                    }
+                },
+            };
+            if !is_xml_path(&source) {
+                return error(400, "give the full path of simplewall's profile.xml");
             }
-            json(serde_json::to_string(&plan).unwrap())
+            import(
+                state,
+                enforcer,
+                swimport::plan(Path::new(&source)),
+                opts.apply,
+            )
+        }
+        (Method::Post, "/api/import/windows-firewall") => {
+            let opts: ImportOpts = match read_json_body(req) {
+                Ok(o) => o,
+                Err(resp) => return resp,
+            };
+            import(state, enforcer, fwimport::plan(), opts.apply)
         }
         _ => error(404, "not found"),
     }
+}
+
+fn is_xml_path(p: &str) -> bool {
+    p.to_lowercase().ends_with(".xml") && Path::new(p).is_absolute()
+}
+
+/// Report an importer's plan and, with `apply`, merge its rules into ours.
+fn import(
+    state: &State,
+    enforcer: &Enforcer,
+    plan: Result<nlimport::Plan, String>,
+    apply: bool,
+) -> Reply {
+    let plan = match plan {
+        Ok(p) => p,
+        Err(e) => return error(400, &e),
+    };
+    if apply {
+        let merged: Vec<Rule> = plan
+            .rules
+            .iter()
+            .filter(|r| validate(r).is_ok())
+            .map(|r| nlimport::merge(state.rule_for(&app_key(&r.path)), r.clone()))
+            .collect();
+        let n = merged.len();
+        if let Err(e) = state.set_rules(merged) {
+            return error(500, &format!("could not save rules: {e}"));
+        }
+        state.log(format!("imported {n} rules from {}", plan.source));
+        enforcer.apply();
+    }
+    json(serde_json::to_string(&plan).unwrap())
 }
 
 #[derive(serde::Deserialize)]

@@ -29,6 +29,7 @@ driver when it's installed.
 | Upload limits without WinDivert | Windows Policy-based QoS (`src/qos.rs`) |
 | **Find programs**: every program that uses the network, by name, without knowing its path | usage history + open sockets + Windows Firewall rules (`src/catalog.rs`) |
 | Import NetLimiter 5 rules | read-only importer with a preview (`src/nlimport.rs`) |
+| Import Windows Firewall block rules and simplewall's blocked programs | read-only importers with the same preview (`src/fwimport.rs`, `src/swimport.rs`) |
 | **New-program alerts**: notified when a program uses the network for the first time; strict mode blocks it until you allow it | `src/watch.rs` |
 | **Schedules** (a block or limit only at certain times) and **data quotas** (per day or month, then block or slow down) | `src/timed.rs` |
 | Tray icon with live speed and notifications | `netleash-tray.exe` (`src/bin/netleash-tray.rs`), started at each user's logon |
@@ -134,6 +135,26 @@ contains no WinDivert files, so there's nothing in it for Defender to flag.
   Everything else is listed with the reason it can't be expressed: Allow and Ask
   rules, disabled rules, other zone rules, rules with address or port conditions,
   limits on internet traffic only, and Store apps identified by package.
+- **Import from… Windows Firewall** reads Windows Defender Firewall's rules
+  (only reads them; this also covers rules made with Windows Firewall Control)
+  and previews the result. Enabled per-program Block rules become blocks in the
+  same direction; a Block rule whose remote address is the "Internet" keyword
+  becomes an internet-only block, and a TCP + UDP pair of otherwise identical
+  rules (what Windows' "allow access?" prompt creates) counts as any protocol.
+  Listed with the reason instead: Allow rules, disabled rules, rules without a
+  program, and rules only for certain protocols, ports, addresses, services,
+  users, interfaces or network profiles (Domain/Private/Public), and Store apps.
+- **Import from… simplewall** reads simplewall's `profile.xml` (found in each
+  user's `%APPDATA%\Henry++\simplewall`, or give the path of a portable copy).
+  simplewall blocks every program it doesn't allow; NetLeash allows by default,
+  so programs the profile lists as blocked (unchecked) become blocks, in the
+  directions simplewall blocks (its `simplewall.ini` settings), and enabled
+  Block rules for programs without address, port, protocol or IP-version
+  conditions become blocks. Programs never listed in the profile, allowed
+  programs, blocked programs that an Allow rule opens up partly, rules with
+  conditions, built-in rules, services and Store apps are listed with the
+  reason. Only plain-XML profiles can be read (simplewall can also save them
+  compressed or encrypted).
 
 Files: rules in `C:\ProgramData\NetLeash\rules.json`, usage history in `usage.json`,
 and a log in `netleash.log` (1 MB, plus one older file).
@@ -195,7 +216,8 @@ sender's TCP back off.
 ## Testing status
 
 The unit tests cover the parsers, the rule logic, the token bucket, the
-NetLimiter importer, wildcard paths and the program catalog (`cargo test`).
+importers (NetLimiter, Windows Firewall, simplewall), wildcard paths and the
+program catalog (`cargo test`).
 Demo mode (`netleash --demo`) exercises the UI without Administrator rights.
 
 Verified on a real, elevated installation (Windows 11):
@@ -215,6 +237,10 @@ Not yet verified on a real installation:
 - **Clean-up after uninstalling:** `sc.exe query WinDivert` should report that the
   service isn't running or doesn't exist. Use `sc.exe` in PowerShell; plain `sc` is `Set-Content` there.
 - **Starting at boot after a restart.**
+- **simplewall import** against a profile saved by simplewall itself. The
+  parser follows simplewall's source (3.x, profile version 3 to 6) and is tested
+  with sample data; the Windows Firewall import has been previewed against a
+  real rule store, but not yet applied.
 
 Reports from other PCs are welcome. Please open an issue.
 
@@ -265,7 +291,9 @@ src/windivert.rs  runtime-loaded WinDivert bindings, packet header parser
 src/qos.rs        NetQosPolicy upload limits (fallback)
 src/enforce.rs    rules -> WFP + limiter (or QoS)
 src/catalog.rs    "Find programs": history + open sockets + firewall rules, version-info names
-src/nlimport.rs   NetLimiter 5 settings importer
+src/nlimport.rs   NetLimiter 5 settings importer, shared import plan and merge
+src/fwimport.rs   Windows Firewall block rule importer
+src/swimport.rs   simplewall profile importer
 src/pathglob.rs   wildcard program paths
 src/conns.rs      connection tables, closing connections
 src/sys.rs        elevation, time, process paths, Ctrl+C

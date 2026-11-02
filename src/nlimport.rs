@@ -334,7 +334,7 @@ pub fn parse(xml: &str) -> Result<(Vec<Rule>, Vec<Skipped>), String> {
     Ok((rules, skipped))
 }
 
-/// NetLimiter stores paths lowercased. If the file exists, use the real
+/// NetLimiter and simplewall may store paths lowercased. If the file exists, use the real
 /// spelling so the UI shows "C:\Program Files\..." rather than "c:\program files\...".
 fn real_case(path: &str) -> Option<String> {
     let p = std::fs::canonicalize(path).ok()?;
@@ -350,7 +350,13 @@ pub fn plan(path: &Path) -> Result<Plan, String> {
         return Err(format!("{} is unexpectedly large", path.display()));
     }
     let xml = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
-    let (mut rules, skipped) = parse(&xml)?;
+    let (rules, skipped) = parse(&xml)?;
+    Ok(finish(path.display().to_string(), rules, skipped))
+}
+
+/// Fix up path spelling and note which programs aren't on disk. Shared by
+/// every importer.
+pub fn finish(source: String, mut rules: Vec<Rule>, skipped: Vec<Skipped>) -> Plan {
     let mut missing_files = Vec::new();
     for r in &mut rules {
         if crate::pathglob::has_wildcard(&r.path) {
@@ -365,12 +371,12 @@ pub fn plan(path: &Path) -> Result<Plan, String> {
             None => {}
         }
     }
-    Ok(Plan {
-        source: path.display().to_string(),
+    Plan {
+        source,
         rules,
         skipped,
         missing_files,
-    })
+    }
 }
 
 /// Combine an imported rule with an existing one: blocks add up, and limits

@@ -167,6 +167,11 @@
       <span style="flex:1"></span>
       <button class="act primary" id="picker-open">Find programs…</button>
       <button class="act" id="import-open">Import from NetLimiter…</button>
+      <select id="import-other" title="Import rules from another firewall">
+        <option value="" selected disabled>Import from…</option>
+        <option value="windows-firewall">Windows Firewall…</option>
+        <option value="simplewall">simplewall…</option>
+      </select>
     </div>
     <div class="wrap">
       <table>
@@ -229,12 +234,12 @@
 </dialog>
 <dialog id="import">
   <div class="body">
-    <h2>Import rules from NetLimiter</h2>
-    <div class="toolbar">
+    <h2 id="import-title">Import rules from NetLimiter</h2>
+    <div class="toolbar" id="import-file">
       <input type="text" id="import-path" spellcheck="false" style="flex:1; background:var(--input); color:var(--text); border:1px solid var(--line); border-radius:6px; padding:5px 8px; font:inherit">
       <button class="act" id="import-preview">Read file</button>
     </div>
-    <p class="muted">NetLimiter's settings file is only read. Nothing changes until you press Import.
+    <p class="muted"><span id="import-what">NetLimiter's settings file is</span> only read. Nothing changes until you press Import.
       Imported blocks are added to existing rules; limits you already set in NetLeash are kept.</p>
     <div id="import-result"></div>
   </div>
@@ -672,8 +677,16 @@ $("add-save").addEventListener("click", async () => {
   } catch (e) { alert(e.message); }
 });
 
-// ---- import from NetLimiter ------------------------------------------------------
+// ---- import from NetLimiter, Windows Firewall, simplewall ------------------------
 const DEFAULT_NL = "C:\\ProgramData\\Locktime\\NetLimiter\\5\\nl_settings.xml";
+const IMPORT_SOURCES = {
+  netlimiter: { name: "NetLimiter", what: "NetLimiter's settings file is", path: DEFAULT_NL },
+  // An empty path: NetLeash looks for simplewall's profile itself.
+  simplewall: { name: "simplewall", what: "simplewall's profile.xml is", path: "" },
+  "windows-firewall": { name: "Windows Firewall", what: "Windows Firewall's rules are" },
+};
+let importSource = "netlimiter";
+const importPaths = {};
 function fmtLimit(b) { return b ? `${Math.round(b / 1024)} KB/s` : ""; }
 
 function renderPlan(plan, applied) {
@@ -700,7 +713,7 @@ function renderPlan(plan, applied) {
   }
   const groups = new Map();
   for (const s of plan.skipped) { if (!groups.has(s.reason)) groups.set(s.reason, []); groups.get(s.reason).push(s.what); }
-  out.push(el("h3", {}, `${plan.skipped.length} NetLimiter rules not imported`));
+  out.push(el("h3", {}, `${plan.skipped.length} ${IMPORT_SOURCES[importSource].name} rules not imported`));
   for (const [reason, items] of [...groups].sort((a, b) => b[1].length - a[1].length)) {
     out.push(el("details", {}, el("summary", {}, `${items.length} × ${reason}`),
       el("ul", {}, ...items.map((w) => el("li", { class: "muted" }, w)))));
@@ -712,7 +725,10 @@ async function importRun(apply) {
   $("import-apply").disabled = true;
   $("import-result").replaceChildren(el("p", { class: "muted" }, apply ? "Importing…" : "Reading…"));
   try {
-    const plan = await api("/api/import/netlimiter", { path: $("import-path").value.trim(), apply });
+    const body = { apply };
+    if ("path" in IMPORT_SOURCES[importSource]) body.path = importPaths[importSource] = $("import-path").value.trim();
+    const plan = await api(`/api/import/${importSource}`, body);
+    if ("path" in body) $("import-path").value = importPaths[importSource] = plan.source;
     renderPlan(plan, apply);
     $("import-apply").disabled = apply || plan.rules.length === 0;
     if (apply) { $("view").value = "rules"; remember("view", "rules"); refresh(); }
@@ -720,10 +736,21 @@ async function importRun(apply) {
     $("import-result").replaceChildren(el("p", { class: "bad" }, e.message));
   }
 }
-$("import-open").addEventListener("click", () => {
-  if (!$("import-path").value) $("import-path").value = DEFAULT_NL;
+function importOpen(source) {
+  const s = IMPORT_SOURCES[source];
+  importSource = source;
+  $("import-title").textContent = `Import rules from ${s.name}`;
+  $("import-what").textContent = s.what;
+  $("import-file").classList.toggle("hidden", !("path" in s));
+  $("import-path").value = importPaths[source] ?? s.path ?? "";
   $("import").showModal();
   importRun(false);
+}
+$("import-open").addEventListener("click", () => importOpen("netlimiter"));
+$("import-other").addEventListener("change", (e) => {
+  const source = e.target.value;
+  e.target.value = "";
+  importOpen(source);
 });
 $("import-preview").addEventListener("click", () => importRun(false));
 $("import-apply").addEventListener("click", () => importRun(true));
