@@ -155,6 +155,15 @@ impl Blocker {
             }));
         }
 
+        // Loopback always stays open, also under a full block: blocking the
+        // browser that shows NetLeash's page must not lock the user out of it.
+        let mut is_loopback: FWPM_FILTER_CONDITION0 = unsafe { std::mem::zeroed() };
+        is_loopback.fieldKey = FWPM_CONDITION_FLAGS;
+        is_loopback.matchType = FWP_MATCH_FLAGS_ALL_SET;
+        is_loopback.conditionValue.r#type = FWP_UINT32;
+        is_loopback.conditionValue.Anonymous.uint32 = FWP_CONDITION_FLAG_IS_LOOPBACK;
+        let mut loopback = [app, is_loopback];
+
         let name = wide(&format!(
             "NetLeash block {way:?}{} {path}",
             if internet_only { " internet" } else { "" }
@@ -163,8 +172,10 @@ impl Blocker {
         let mut result = Ok(());
         // way.layers() is [IPv4, IPv6].
         for (layer, local) in way.layers().into_iter().zip([&mut local_v4, &mut local_v6]) {
-            let mut wanted: Vec<(u32, u8, &mut [FWPM_FILTER_CONDITION0])> =
-                vec![(FWP_ACTION_BLOCK, 1, std::slice::from_mut(&mut app))];
+            let mut wanted: Vec<(u32, u8, &mut [FWPM_FILTER_CONDITION0])> = vec![
+                (FWP_ACTION_BLOCK, 1, std::slice::from_mut(&mut app)),
+                (FWP_ACTION_PERMIT, 2, loopback.as_mut_slice()),
+            ];
             if internet_only {
                 wanted.push((FWP_ACTION_PERMIT, 2, local.as_mut_slice()));
             }
@@ -295,7 +306,8 @@ mod tests {
 
         let (_, errs) = b.sync(&[(path.clone(), Way::Out, false)]);
         assert!(errs.is_empty(), "{errs:?}");
-        assert_ne!(curl(&exe, &local), 0, "full block: local blocked too");
+        assert_eq!(curl(&exe, &local), 0, "full block: loopback still works");
+        assert_ne!(curl(&exe, internet), 0, "full block: internet blocked");
 
         b.sync(&[]);
         assert_eq!(curl(&exe, internet), 0, "unblocked again");

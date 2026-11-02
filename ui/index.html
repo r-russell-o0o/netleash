@@ -301,7 +301,10 @@ async function api(path, body) {
     method: "POST", body: JSON.stringify(body),
     headers: { "Content-Type": "application/json", "X-NetLeash": "1" },
   };
-  const r = await fetch(path, opt);
+  let r;
+  try { r = await fetch(path, opt); } catch {
+    throw new Error("Can't reach NetLeash, so nothing was changed. Is NetLeash still running?");
+  }
   const j = await r.json();
   if (!r.ok) throw new Error(j.error || r.statusText);
   return j;
@@ -310,8 +313,10 @@ async function api(path, body) {
 async function saveRule(app, patch) {
   const cur = app.rule || { path: app.path, block_in: false, block_out: false, up_limit: null, down_limit: null };
   const rule = { ...cur, path: cur.path || app.path, ...patch };
-  try { await api("/api/rule", rule); } catch (e) { alert(e.message); }
+  let ok = true;
+  try { await api("/api/rule", rule); } catch (e) { ok = false; alert(e.message); }
   refresh();
+  return ok;
 }
 
 // ---- applications table ------------------------------------------------
@@ -356,7 +361,8 @@ function makeRow(app) {
   r.block.addEventListener("change", () => {
     const v = r.block.value;
     if (v !== "allow" && !confirm(`${FW_LABEL[v]} for ${r.app.name}?`)) { r.block.value = fwValue(r.app.rule); return; }
-    saveRule(r.app, fwPatch(v));
+    // On failure, show the setting that is really in force again.
+    saveRule(r.app, fwPatch(v)).then((ok) => { if (!ok) r.block.value = fwValue(r.app.rule); });
   });
   r.upIn = kbInput("Upload limit, KB/s", false, (v) => saveRule(r.app, { up_limit: v }));
   r.downIn = kbInput("Download limit, KB/s", !window.shaper, (v) => saveRule(r.app, { down_limit: v }));

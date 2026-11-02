@@ -178,7 +178,8 @@ pub fn pids_with_tcp() -> Vec<u32> {
 /// Reset the established IPv4 TCP connections of `pids`. A WFP block only
 /// stops *new* connections; this ends the ones already open. Windows has no
 /// equivalent call for IPv6 sockets, so those drain when the app closes them.
-/// With `keep_local`, connections to the local network stay open.
+/// Loopback connections always stay open; with `keep_local`, connections to
+/// the local network do too.
 /// Returns how many connections were closed.
 pub fn close_tcp4(pids: &[u32], keep_local: bool) -> usize {
     let want: HashSet<u32> = pids.iter().copied().collect();
@@ -187,7 +188,9 @@ pub fn close_tcp4(pids: &[u32], keep_local: bool) -> usize {
         if !want.contains(&r.dwOwningPid) || r.dwState == 2 {
             continue; // not ours, or a listening socket
         }
-        if keep_local && crate::lan::is_local_v4(v4(r.dwRemoteAddr)) {
+        let remote = v4(r.dwRemoteAddr);
+        // Loopback is never blocked (a browser showing NetLeash's own page).
+        if remote.is_loopback() || (keep_local && crate::lan::is_local_v4(remote)) {
             continue;
         }
         let row = MIB_TCPROW_LH {
