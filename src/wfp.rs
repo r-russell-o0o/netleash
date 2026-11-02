@@ -47,6 +47,7 @@ pub type BlockKey = (String, Way, bool);
 
 pub struct Blocker {
     engine: HANDLE,
+    sublayer: GUID,
     /// block -> ids of the filters that make it
     filters: HashMap<BlockKey, Vec<u64>>,
 }
@@ -64,6 +65,12 @@ fn check(what: &str, rc: u32) -> Result<(), String> {
 
 impl Blocker {
     pub fn open() -> Result<Self, String> {
+        Self::open_in(SUBLAYER)
+    }
+
+    /// A sublayer key can exist only once system-wide; the test uses its own
+    /// so it can run next to an installed NetLeash.
+    fn open_in(sublayer: GUID) -> Result<Self, String> {
         let name = wide("NetLeash");
         let mut session: FWPM_SESSION0 = unsafe { std::mem::zeroed() };
         session.flags = FWPM_SESSION_FLAG_DYNAMIC;
@@ -79,7 +86,7 @@ impl Blocker {
             )
         })?;
         let mut sub: FWPM_SUBLAYER0 = unsafe { std::mem::zeroed() };
-        sub.subLayerKey = SUBLAYER;
+        sub.subLayerKey = sublayer;
         sub.displayData.name = name.as_ptr() as *mut _;
         sub.weight = 0x8000;
         if let Err(e) = check("FwpmSubLayerAdd0", unsafe {
@@ -90,6 +97,7 @@ impl Blocker {
         }
         Ok(Blocker {
             engine,
+            sublayer,
             filters: HashMap::new(),
         })
     }
@@ -164,7 +172,7 @@ impl Blocker {
                 let mut f: FWPM_FILTER0 = unsafe { std::mem::zeroed() };
                 f.displayData.name = name.as_ptr() as *mut _;
                 f.layerKey = layer;
-                f.subLayerKey = SUBLAYER;
+                f.subLayerKey = self.sublayer;
                 f.weight.r#type = FWP_UINT8;
                 f.weight.Anonymous.uint8 = weight;
                 f.numFilterConditions = conds.len() as u32;
@@ -270,7 +278,8 @@ mod tests {
         assert_eq!(curl(&exe, &local), 0, "local, no block");
         assert_eq!(curl(&exe, internet), 0, "internet, no block");
 
-        let mut b = Blocker::open().expect("run elevated");
+        let test_sublayer = GUID::from_u128(0x6e4b1f3a_8c2d_4b7e_9a51_2f0c8d3e7a11);
+        let mut b = Blocker::open_in(test_sublayer).expect("run elevated");
         let (_, errs) = b.sync(&[(path.clone(), Way::Out, true)]);
         assert!(errs.is_empty(), "{errs:?}");
         assert_eq!(
