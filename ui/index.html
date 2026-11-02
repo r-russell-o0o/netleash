@@ -91,7 +91,8 @@
   .np-name small { display: block; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .tag.bad { color: var(--bad); border-color: var(--bad); }
   .timed { display: grid; gap: 6px; margin: 4px 0 10px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; }
-  .timed label.day { margin-left: 6px; }
+  .timed > div { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; }
+  .timed label.day { white-space: nowrap; }
   .timed input[type=time] { width: 96px; }
   button.act.danger { border-color: var(--bad); color: var(--bad); }
   #picker { width: min(1180px, calc(100vw - 32px)); }
