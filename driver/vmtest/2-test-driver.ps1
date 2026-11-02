@@ -31,8 +31,11 @@ Check ($q -match 'RUNNING') 'driver loads and runs'
 if ($q -notmatch 'RUNNING') { Say $q; Say 'Stopping here.'; exit 1 }
 
 # 2. Test program: a copy of curl, so the limit hits nothing else
+# (Windows 10 before 1803 has no curl of its own; the kit brings one.)
 $curl = Join-Path $env:TEMP 'nl-curl.exe'
-Copy-Item "$env:WINDIR\System32\curl.exe" $curl -Force
+$src = "$env:WINDIR\System32\curl.exe"
+if (-not (Test-Path $src)) { $src = Join-Path $here 'curl.exe' }
+Copy-Item $src $curl -Force
 function Speed {
     $bps = & $curl -s -o NUL --max-time 25 -w '%{speed_download}' $Url
     [math]::Round([double]$bps / 1024)

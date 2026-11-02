@@ -16,6 +16,7 @@ $kit = Join-Path $here 'out\vmkit'
 Remove-Item $kit -Recurse -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory $kit | Out-Null
 Copy-Item (Join-Path $here 'out\netleashlim.sys'), (Join-Path $here 'out\NetLeashTestDriver.cer'), `
-    (Join-Path $root 'target\pkg\release\netleash.exe'), (Join-Path $here 'vmtest\*') $kit
+    (Join-Path $root 'target\pkg\release\netleash.exe'), (Join-Path $here 'vmtest\*'), `
+    "$env:WINDIR\System32\curl.exe" $kit
 Write-Host "VM kit ready: $kit"
 Get-ChildItem $kit | Format-Table Name, Length -AutoSize
