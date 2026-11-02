@@ -21,7 +21,7 @@ $out = Join-Path $dist $name
 Remove-Item $out, "$out.zip" -Recurse -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force $out | Out-Null
 
-Copy-Item (Join-Path $root 'target\pkg\release\netleash.exe') $out
+Copy-Item (Join-Path $root 'target\pkg\release\netleash.exe'), (Join-Path $root 'target\pkg\release\netleash-tray.exe') $out
 Copy-Item (Join-Path $root 'installer\*') $out
 Set-Content (Join-Path $out 'VERSION') "$version ($commit)"
 

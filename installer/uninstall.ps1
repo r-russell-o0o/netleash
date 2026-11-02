@@ -24,7 +24,8 @@ if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
     Stop-ScheduledTask -TaskName $TaskName
     Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
 }
-Get-Process netleash -ErrorAction SilentlyContinue | Stop-Process -Force
+Get-Process netleash, netleash-tray -ErrorAction SilentlyContinue | Stop-Process -Force
+Remove-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run' -Name 'NetLeashTray' -ErrorAction SilentlyContinue
 Start-Sleep -Seconds 2
 
 # Its WFP filters and WinDivert handles vanished with the process. Clean up

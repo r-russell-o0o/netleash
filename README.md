@@ -29,6 +29,8 @@ driver when it's installed.
 | Upload limits without WinDivert | Windows Policy-based QoS (`src/qos.rs`) |
 | **Find programs**: every program that uses the network, by name, without knowing its path | usage history + open sockets + Windows Firewall rules (`src/catalog.rs`) |
 | Import NetLimiter 5 rules | read-only importer with a preview (`src/nlimport.rs`) |
+| **New-program alerts**: notified when a program uses the network for the first time; strict mode blocks it until you allow it | `src/watch.rs` |
+| Tray icon with live speed and notifications | `netleash-tray.exe` (`src/bin/netleash-tray.rs`), started at each user's logon |
 | Wildcard paths, e.g. for Store apps whose folder changes with each update | `src/pathglob.rs` |
 | Daily usage history (120 days) | `src/state.rs` |
 | Starts at boot, restarts itself if it stops | scheduled task as SYSTEM (`installer/install.ps1`) |
@@ -104,6 +106,13 @@ contains no WinDivert files, so there's nothing in it for Defender to flag.
   real name ("Google Chrome · Google LLC") and why it's listed: running now,
   used recently, or named in a Windows Firewall rule. Block or limit it right
   there. A program that isn't listed can be added by typing its path.
+- **New programs**: the panel above the list shows programs that used the
+  network for the first time, with **Allow** and **Block**. Choose *Notify me*,
+  *Block them until I allow them* (strict mode) or *Don't watch*. The tray icon
+  notifies you too. On the first start, programs already in use are learned
+  quietly for 10 minutes. **Limitation:** a program is noticed on its first
+  network activity, so in strict mode its very first packets may already have
+  gone out. Asking *before* the first connection needs a kernel driver of our own.
 - **Import from NetLimiter…** reads NetLimiter 5's settings, only reads them,
   and previews the result before importing. Deny rules become blocks in the
   same direction, and enabled per-program limits become limits. Everything else

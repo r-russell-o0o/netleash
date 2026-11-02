@@ -50,13 +50,13 @@ try {
     if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
         Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
     }
-    Get-Process netleash -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+    Get-Process netleash, netleash-tray -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
     Start-Sleep -Seconds 2
 
     # --- files -----------------------------------------------------------------------
     Step "Copying files to $InstallDir"
     New-Item -ItemType Directory -Force $InstallDir | Out-Null
-    foreach ($f in 'netleash.exe', 'netleash.ico', 'uninstall.ps1', 'README.txt', 'VERSION') {
+    foreach ($f in 'netleash.exe', 'netleash-tray.exe', 'netleash.ico', 'uninstall.ps1', 'README.txt', 'VERSION') {
         $p = Join-Path $src $f
         if (Test-Path $p) { Copy-Item $p $InstallDir -Force }
     }
@@ -167,6 +167,14 @@ not change Defender settings for you.
     Register-ScheduledTask -TaskName $TaskName -Description 'NetLeash network monitor and firewall (UI: http://127.0.0.1:5199)' `
         -Action $action -Trigger $atBoot, $repeat -Principal $principal -Settings $settings -Force | Out-Null
     Start-ScheduledTask -TaskName $TaskName
+
+    # --- tray icon for every user ----------------------------------------------------
+    # Runs in each user's session at logon (not elevated); shows speeds and
+    # new-program notifications. Started now too, as a normal user process:
+    # explorer.exe launches it outside this elevated installer.
+    $trayExe = Join-Path $InstallDir 'netleash-tray.exe'
+    Set-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run' -Name 'NetLeashTray' -Value "`"$trayExe`" --port $Port"
+    Start-Process explorer.exe -ArgumentList "`"$trayExe`""
 
     # --- desktop + Start menu shortcuts, Installed apps ---------------------------------
     # Links to the UI in the default browser, for every user of this PC. The
