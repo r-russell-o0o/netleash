@@ -17,6 +17,8 @@ pub struct Enforcer {
     state: Arc<State>,
     blocker: Mutex<Option<wfp::Blocker>>,
     shaper: Option<Shaper>,
+    /// NetLeash's own driver for download limits (`--limiter driver`), instead of WinDivert.
+    kdriver: Mutex<Option<crate::kdriver::KDriver>>,
     qos_ok: bool,
     failing: Mutex<HashSet<wfp::BlockKey>>,
     /// Wildcard patterns that matched nothing last time (logged once).
@@ -29,7 +31,12 @@ pub struct Enforcer {
 }
 
 impl Enforcer {
-    pub fn new(state: Arc<State>, names: Arc<ProcessNames>, windivert_dir: Option<&Path>) -> Self {
+    pub fn new(
+        state: Arc<State>,
+        names: Arc<ProcessNames>,
+        windivert_dir: Option<&Path>,
+        use_driver: bool,
+    ) -> Self {
         if state.demo {
             state.set_status(|s| {
                 s.blocker = "demo (simulated)".into();
@@ -40,6 +47,7 @@ impl Enforcer {
                 state,
                 blocker: Mutex::new(None),
                 shaper: None,
+                kdriver: Mutex::new(None),
                 qos_ok: false,
                 failing: Mutex::new(HashSet::new()),
                 unmatched: Mutex::new(HashSet::new()),
@@ -61,6 +69,32 @@ impl Enforcer {
         };
         // Clear QoS policies a crashed earlier run may have left, whichever limiter we use.
         let qos_ok = qos::clear().is_ok();
+        if use_driver {
+            match crate::kdriver::KDriver::start() {
+                Ok(k) => {
+                    state.set_status(|st| {
+                        st.limiter = "ok (NetLeash driver + Windows QoS)".into();
+                        st.shaper = "ok (NetLeash driver)".into();
+                    });
+                    return Enforcer {
+                        state,
+                        blocker: Mutex::new(blocker),
+                        shaper: None,
+                        kdriver: Mutex::new(Some(k)),
+                        qos_ok,
+                        failing: Mutex::new(HashSet::new()),
+                        unmatched: Mutex::new(HashSet::new()),
+                        concrete: Mutex::new(Vec::new()),
+                        applied: Mutex::new(Vec::new()),
+                        timed: Mutex::new(HashMap::new()),
+                    };
+                }
+                // Fall back to WinDivert, then to QoS alone.
+                Err(e) => state.log(format!(
+                    "NetLeash driver unavailable, trying WinDivert: {e}"
+                )),
+            }
+        }
         let shaper = match Shaper::start(names, windivert_dir) {
             Ok(s) => {
                 state.set_status(|st| {
@@ -86,6 +120,7 @@ impl Enforcer {
             state,
             blocker: Mutex::new(blocker),
             shaper,
+            kdriver: Mutex::new(None),
             qos_ok,
             failing: Mutex::new(HashSet::new()),
             unmatched: Mutex::new(HashSet::new()),
@@ -253,7 +288,22 @@ impl Enforcer {
     }
 
     fn apply_limits(&self, rules: &[Rule], include_qos: bool) {
-        if let Some(shaper) = &self.shaper {
+        if let Some(k) = self.kdriver.lock().unwrap().as_ref() {
+            let down = rules
+                .iter()
+                .filter(|r| !r.blocks_all())
+                .filter_map(|r| Some((app_key(&r.path), (r.path.clone(), r.down_limit?))))
+                .collect();
+            if let Err(e) = k.set_limits(&down) {
+                self.state.log(format!("download limits: {e}"));
+            }
+            if include_qos
+                && self.qos_ok
+                && let Err(e) = qos::apply(rules)
+            {
+                self.state.log(format!("upload limit: {e}"));
+            }
+        } else if let Some(shaper) = &self.shaper {
             let mut limits = HashMap::new();
             for r in rules.iter().filter(|r| !r.blocks_all()) {
                 if let Some(v) = r.up_limit {
@@ -281,6 +331,7 @@ impl Enforcer {
         if let Some(s) = &self.shaper {
             s.shutdown();
         }
+        self.kdriver.lock().unwrap().take();
         if !self.state.demo && self.qos_ok {
             let _ = qos::clear();
         }

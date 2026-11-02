@@ -249,6 +249,24 @@ Not yet verified on a real installation:
 
 Reports from other PCs are welcome. Please open an issue.
 
+## Own driver for download limits (experimental, not shipped yet)
+
+`driver/` holds `netleashlim.sys`, a small WFP callout driver meant to replace
+WinDivert for download limits, so that installing NetLeash needs no Defender
+exclusion. It is narrow on purpose: its only command is "these programs may
+download at these rates"; it can't read, change or inject packets. TCP is
+slowed by deferring received data (the TCP window closes, nothing is
+dropped), UDP/QUIC by dropping datagrams over the limit; uploads use
+Windows' built-in QoS. It fails open: its filters live in NetLeash's dynamic
+WFP session, and closing the device handle lifts every limit.
+
+- Build: `driver\build.ps1` (Build Tools 2022 + Windows Driver Kit; runs `/analyze`
+  and the token-bucket tests). Use it with `netleash --limiter driver`.
+- Test: `driver\make-vmkit.ps1` makes a test-signed kit for a **test VM**
+  (`driver\vmtest\README.txt`). It has not been loaded on a real system yet.
+- Shipping it needs Microsoft's attestation signing: a registered business,
+  an EV code signing certificate and a Hardware Dev Center account. Until
+  then WinDivert stays the default.
 ## Building from source
 
 Requires Rust (<https://rustup.rs>). `rust-toolchain.toml` pins the GNU toolchain,

@@ -8,6 +8,7 @@ mod demo;
 mod enforce;
 mod etw;
 mod fwimport;
+mod kdriver;
 mod lan;
 mod nlimport;
 mod pathglob;
@@ -35,17 +36,21 @@ struct Args {
     data_dir: Option<PathBuf>,
     open: bool,
     windivert: Option<PathBuf>,
+    /// Download limiter: NetLeash's own driver instead of WinDivert.
+    driver: bool,
 }
 
 fn usage() -> ! {
     eprintln!(
-        "usage: netleash [--demo] [--port N] [--data-dir DIR] [--windivert DIR] [--open]\n\n  \
+        "usage: netleash [--demo] [--port N] [--data-dir DIR] [--windivert DIR] [--limiter windivert|driver] [--open]\n\n  \
          --demo       synthetic traffic, no Administrator needed, OS untouched\n  \
          --port N     web UI port on 127.0.0.1 (default {DEFAULT_PORT})\n  \
          --data-dir   where rules.json and usage.json live\n               \
          (default %ProgramData%\\NetLeash, or .\\demo-data with --demo)\n  \
          --windivert  folder holding WinDivert.dll and WinDivert64.sys\n               \
          (default: <exe dir>\\windivert, or the project's vendor folder)\n  \
+         --limiter    download limits through WinDivert (default) or NetLeash's own\n               \
+         driver (driver\\netleashlim.sys, installed as the NetLeashLimiter service)\n  \
          --open       open the UI in the default browser\n  \
          --check-windivert  test that WinDivert loads and its driver starts, then exit"
     );
@@ -90,6 +95,7 @@ fn parse_args() -> Args {
         data_dir: None,
         open: false,
         windivert: None,
+        driver: false,
     };
     let mut it = std::env::args().skip(1);
     while let Some(arg) = it.next() {
@@ -106,6 +112,11 @@ fn parse_args() -> Args {
             "--windivert" => {
                 a.windivert = Some(it.next().map(PathBuf::from).unwrap_or_else(|| usage()))
             }
+            "--limiter" => match it.next().as_deref() {
+                Some("driver") => a.driver = true,
+                Some("windivert") => a.driver = false,
+                _ => usage(),
+            },
             "--data-dir" => {
                 a.data_dir = Some(it.next().map(PathBuf::from).unwrap_or_else(|| usage()))
             }
@@ -190,6 +201,7 @@ fn main() {
         state.clone(),
         names.clone(),
         args.windivert.as_deref(),
+        args.driver,
     ));
     enforcer.apply();
 
