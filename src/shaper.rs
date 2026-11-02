@@ -4,9 +4,15 @@
 //! diverted to user mode. Each packet is attributed to a process by its local
 //! port, and from there to an app. Packets of limited apps pass through a
 //! token bucket: a packet within budget is re-injected at once, an
-//! over-budget packet waits in a short queue, and anything beyond the queue is
-//! dropped so that TCP backs off. Packets of unlimited apps, or ones we can't
-//! attribute, are re-injected immediately.
+//! over-budget packet waits in its connection's queue, and the queues are
+//! released round-robin. Only when the queues are full is a packet dropped,
+//! always from the connection holding the most, so that TCP backs off. Packets
+//! of unlimited apps, or ones we can't attribute, are re-injected immediately.
+//!
+//! Delay is preferred over loss on purpose. Under a low limit shared by many
+//! connections (a browser speed test), each connection has only a packet or
+//! two in flight; a lost one can't be fast-retransmitted, so the sender waits
+//! for a retransmission timeout and the app gets a fraction of its limit.
 //!
 //! Fail-open: when there are no limits the packet handle is closed, so no
 //! traffic passes through NetLeash at all. If the process dies, WinDivert
@@ -37,12 +43,23 @@ pub enum Verdict {
     Drop,
 }
 
+/// A connection, as seen from its packets: (protocol, source port, destination port).
+type FlowId = (u8, u16, u16);
+
+#[derive(Default)]
+struct FlowQueue {
+    packets: VecDeque<(Vec<u8>, Address)>,
+    bytes: usize,
+}
+
 pub struct Bucket {
     rate: f64,
     burst: f64,
     tokens: f64,
     last: Instant,
-    queue: VecDeque<(Vec<u8>, Address)>,
+    flows: HashMap<FlowId, FlowQueue>,
+    /// Connections with waiting packets, in the order they are served.
+    order: VecDeque<FlowId>,
     queued_bytes: usize,
     cap_bytes: usize,
 }
@@ -54,7 +71,8 @@ impl Bucket {
             burst: 0.0,
             tokens: 0.0,
             last: now,
-            queue: VecDeque::new(),
+            flows: HashMap::new(),
+            order: VecDeque::new(),
             queued_bytes: 0,
             cap_bytes: 0,
         };
@@ -63,12 +81,13 @@ impl Bucket {
         b
     }
 
-    /// Burst is 100 ms of traffic (at least two full-size packets); the queue
-    /// holds at most 250 ms, so a limit adds little latency.
+    /// Burst is 100 ms of traffic (at least two full-size packets); the queues
+    /// hold up to 1 s (at least eight full-size packets), so senders are slowed
+    /// by delay long before they see a loss.
     pub fn set_rate(&mut self, rate: u64) {
         self.rate = rate as f64;
         self.burst = (self.rate / 10.0).max(3000.0);
-        self.cap_bytes = ((self.rate / 4.0) as usize).max(6000);
+        self.cap_bytes = (self.rate as usize).max(12_000);
         self.tokens = self.tokens.min(self.burst);
     }
 
@@ -87,35 +106,79 @@ impl Bucket {
 
     pub fn admit(&mut self, packet: &[u8], addr: &Address, now: Instant) -> Verdict {
         self.refill(now);
-        if self.queue.is_empty() && self.fits(packet.len()) {
-            self.tokens -= packet.len() as f64;
-            Verdict::Pass
-        } else if self.queued_bytes + packet.len() <= self.cap_bytes {
-            self.queued_bytes += packet.len();
-            self.queue.push_back((packet.to_vec(), *addr));
-            Verdict::Queued
-        } else {
-            Verdict::Drop
+        let len = packet.len();
+        if self.queued_bytes == 0 && self.fits(len) {
+            self.tokens -= len as f64;
+            return Verdict::Pass;
+        }
+        let id = wd::ports(packet).unwrap_or_default();
+        // Make room by dropping from whichever connection holds the most. A
+        // connection with that much waiting has enough in flight to recover
+        // from the loss quickly; one with a packet or two would stall.
+        while self.queued_bytes + len > self.cap_bytes {
+            let own = self.flows.get(&id).map_or(0, |f| f.bytes);
+            let longest = self
+                .flows
+                .iter()
+                .max_by_key(|(_, f)| f.bytes)
+                .map(|(k, f)| (*k, f.bytes));
+            match longest {
+                Some((k, bytes)) if k != id && bytes > own + len => self.drop_last(k),
+                _ => return Verdict::Drop,
+            }
+        }
+        let f = self.flows.entry(id).or_default();
+        if f.packets.is_empty() {
+            self.order.push_back(id);
+        }
+        f.packets.push_back((packet.to_vec(), *addr));
+        f.bytes += len;
+        self.queued_bytes += len;
+        Verdict::Queued
+    }
+
+    /// Drop the newest waiting packet of connection `id`.
+    fn drop_last(&mut self, id: FlowId) {
+        let f = self.flows.get_mut(&id).unwrap();
+        let (p, _) = f.packets.pop_back().unwrap();
+        f.bytes -= p.len();
+        self.queued_bytes -= p.len();
+        if f.packets.is_empty() {
+            self.flows.remove(&id);
+            self.order.retain(|k| *k != id);
         }
     }
 
-    /// Packets whose turn has come.
+    /// Packets whose turn has come, one per connection in turn.
     pub fn release(&mut self, now: Instant, out: &mut Vec<(Vec<u8>, Address)>) {
         self.refill(now);
-        while let Some((p, _)) = self.queue.front() {
-            if !self.fits(p.len()) {
+        while let Some(&id) = self.order.front() {
+            let next = self.flows[&id].packets.front().unwrap().0.len();
+            if !self.fits(next) {
                 break;
             }
-            let (p, a) = self.queue.pop_front().unwrap();
+            let f = self.flows.get_mut(&id).unwrap();
+            let (p, a) = f.packets.pop_front().unwrap();
+            f.bytes -= p.len();
+            self.order.pop_front();
+            if f.packets.is_empty() {
+                self.flows.remove(&id);
+            } else {
+                self.order.push_back(id);
+            }
             self.tokens -= p.len() as f64;
             self.queued_bytes -= p.len();
             out.push((p, a));
         }
     }
 
-    fn drain(&mut self) -> impl Iterator<Item = (Vec<u8>, Address)> + '_ {
+    fn drain(&mut self) -> Vec<(Vec<u8>, Address)> {
         self.queued_bytes = 0;
-        self.queue.drain(..)
+        self.order.clear();
+        self.flows
+            .drain()
+            .flat_map(|(_, f)| f.packets)
+            .collect()
     }
 }
 
@@ -363,10 +426,10 @@ mod tests {
         let t0 = Instant::now();
         let addr = Address::zeroed();
         let pkt = vec![0u8; 1500];
-        let mut b = Bucket::new(30_000, t0); // burst 3000 B, queue cap 7500 B
+        let mut b = Bucket::new(30_000, t0); // burst 3000 B, queue cap 30000 B
         assert!(matches!(b.admit(&pkt, &addr, t0), Verdict::Pass));
         assert!(matches!(b.admit(&pkt, &addr, t0), Verdict::Pass));
-        for _ in 0..5 {
+        for _ in 0..20 {
             assert!(matches!(b.admit(&pkt, &addr, t0), Verdict::Queued));
         }
         assert!(matches!(b.admit(&pkt, &addr, t0), Verdict::Drop));
@@ -399,6 +462,57 @@ mod tests {
             (200_000..=212_000).contains(&sent),
             "sent {sent} bytes in 2 s"
         );
+    }
+
+    /// A 1500-byte IPv4 TCP packet from local port `sport`.
+    fn tcp(sport: u16) -> Vec<u8> {
+        let mut p = vec![0u8; 1500];
+        p[0] = 0x45;
+        p[9] = 6;
+        p[20..22].copy_from_slice(&sport.to_be_bytes());
+        p[22..24].copy_from_slice(&443u16.to_be_bytes());
+        p
+    }
+
+    fn sport(p: &[u8]) -> u16 {
+        wd::ports(p).unwrap().1
+    }
+
+    #[test]
+    fn connections_are_served_in_turn() {
+        let t0 = Instant::now();
+        let addr = Address::zeroed();
+        let mut b = Bucket::new(30_000, t0);
+        b.admit(&tcp(1), &addr, t0);
+        b.admit(&tcp(1), &addr, t0); // the burst is spent
+        for _ in 0..4 {
+            assert!(matches!(b.admit(&tcp(1), &addr, t0), Verdict::Queued));
+        }
+        assert!(matches!(b.admit(&tcp(2), &addr, t0), Verdict::Queued));
+        let mut out = Vec::new();
+        b.release(t0 + Duration::from_millis(100), &mut out); // budget for two
+        let ports: Vec<u16> = out.iter().map(|(p, _)| sport(p)).collect();
+        assert_eq!(ports, [1, 2], "the late connection doesn't wait behind the busy one");
+    }
+
+    #[test]
+    fn full_queue_drops_from_the_busiest_connection() {
+        let t0 = Instant::now();
+        let addr = Address::zeroed();
+        let mut b = Bucket::new(10_000, t0); // burst 3000 B, queue cap 12000 B
+        b.admit(&tcp(1), &addr, t0);
+        b.admit(&tcp(1), &addr, t0);
+        for _ in 0..8 {
+            assert!(matches!(b.admit(&tcp(1), &addr, t0), Verdict::Queued));
+        }
+        // Full. A quiet connection still gets in, at the busy one's expense...
+        assert!(matches!(b.admit(&tcp(2), &addr, t0), Verdict::Queued));
+        // ...while the busy one's own new packet is the one dropped.
+        assert!(matches!(b.admit(&tcp(1), &addr, t0), Verdict::Drop));
+        assert!(matches!(b.admit(&tcp(2), &addr, t0), Verdict::Queued));
+        let bytes = |port| b.flows.iter().find(|(k, _)| k.1 == port).unwrap().1.bytes;
+        assert_eq!((bytes(1), bytes(2)), (9000, 3000));
+        assert_eq!(b.queued_bytes, 12_000);
     }
 
     #[test]
