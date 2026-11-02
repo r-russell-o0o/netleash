@@ -230,6 +230,9 @@ fn main() {
                 st.tick(&sys::local_date());
                 watch::process(&wt, &st, &en);
                 n += 1;
+                if n.is_multiple_of(10) {
+                    en.report_limits(10.0);
+                }
                 if n.is_multiple_of(60) {
                     st.flush_usage();
                     en.refresh();

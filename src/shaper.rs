@@ -25,15 +25,17 @@ use crate::sys::ProcessNames;
 use crate::windivert::{self as wd, Address, Api, Handle};
 use std::collections::{HashMap, VecDeque};
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 /// How often queued packets are released.
 const TICK: Duration = Duration::from_millis(2);
-/// Minimum interval between full re-reads of the connection tables on a lookup miss.
-const TABLE_REFRESH: Duration = Duration::from_millis(250);
+/// Minimum interval between full re-reads of the connection tables on a lookup
+/// miss. Packets of a connection not yet known pass unlimited, so this is kept
+/// short: a browser speed test opens dozens of connections.
+const TABLE_REFRESH: Duration = Duration::from_millis(20);
 
 // ---- token bucket ----------------------------------------------------------
 
@@ -62,6 +64,9 @@ pub struct Bucket {
     order: VecDeque<FlowId>,
     queued_bytes: usize,
     cap_bytes: usize,
+    /// Bytes let through and dropped since the last report.
+    sent: u64,
+    dropped: u64,
 }
 
 impl Bucket {
@@ -75,6 +80,8 @@ impl Bucket {
             order: VecDeque::new(),
             queued_bytes: 0,
             cap_bytes: 0,
+            sent: 0,
+            dropped: 0,
         };
         b.set_rate(rate);
         b.tokens = b.burst;
@@ -112,6 +119,7 @@ impl Bucket {
         }
         if self.queued_bytes == 0 && self.fits(len) {
             self.tokens -= len as f64;
+            self.sent += len as u64;
             return Verdict::Pass;
         }
         let id = wd::ports(packet).unwrap_or_default();
@@ -127,7 +135,10 @@ impl Bucket {
                 .map(|(k, f)| (*k, f.bytes));
             match longest {
                 Some((k, bytes)) if k != id && bytes > own + len => self.drop_last(k),
-                _ => return Verdict::Drop,
+                _ => {
+                    self.dropped += len as u64;
+                    return Verdict::Drop;
+                }
             }
         }
         let f = self.flows.entry(id).or_default();
@@ -146,6 +157,7 @@ impl Bucket {
         let (p, _) = f.packets.pop_back().unwrap();
         f.bytes -= p.len();
         self.queued_bytes -= p.len();
+        self.dropped += p.len() as u64;
         if f.packets.is_empty() {
             self.flows.remove(&id);
             self.order.retain(|k| *k != id);
@@ -171,6 +183,7 @@ impl Bucket {
             }
             self.tokens -= p.len() as f64;
             self.queued_bytes -= p.len();
+            self.sent += p.len() as u64;
             out.push((p, a));
         }
     }
@@ -190,6 +203,8 @@ impl Bucket {
 struct PortMap {
     map: Mutex<HashMap<(u8, u16), u32>>,
     last_refresh: Mutex<Option<Instant>>,
+    /// Packets passed because no process was known for their port.
+    misses: AtomicU64,
 }
 
 impl PortMap {
@@ -205,6 +220,7 @@ impl PortMap {
         {
             let mut last = self.last_refresh.lock().unwrap();
             if last.is_some_and(|t| t.elapsed() < TABLE_REFRESH) {
+                self.misses.fetch_add(1, Ordering::Relaxed);
                 return None;
             }
             *last = Some(Instant::now());
@@ -215,7 +231,11 @@ impl PortMap {
             .collect();
         let mut m = self.map.lock().unwrap();
         *m = fresh; // also forgets ports that have since closed
-        m.get(&(proto, port)).copied()
+        let pid = m.get(&(proto, port)).copied();
+        if pid.is_none() {
+            self.misses.fetch_add(1, Ordering::Relaxed);
+        }
+        pid
     }
 }
 
@@ -255,6 +275,7 @@ impl Shaper {
         let ports = Arc::new(PortMap {
             map: Mutex::new(HashMap::new()),
             last_refresh: Mutex::new(None),
+            misses: AtomicU64::new(0),
         });
         {
             let (flow, ports) = (flow.clone(), ports.clone());
@@ -386,6 +407,33 @@ impl Shaper {
         })
     }
 
+    /// One log line per limit that saw traffic in the last `secs` seconds:
+    /// the rate actually let through against the limit, and what was dropped.
+    pub fn report(&self, secs: f64) -> Vec<String> {
+        let mut lines = Vec::new();
+        for ((key, dir), b) in self.buckets.lock().unwrap().iter_mut() {
+            let (sent, dropped) = (std::mem::take(&mut b.sent), std::mem::take(&mut b.dropped));
+            if sent == 0 && dropped == 0 {
+                continue;
+            }
+            lines.push(format!(
+                "limit {} {}: {:.0} KB/s let through (limit {:.0}), {} KB dropped",
+                crate::state::file_name(key),
+                if *dir == Dir::Up { "up" } else { "down" },
+                sent as f64 / secs / 1024.0,
+                b.rate / 1024.0,
+                dropped / 1024
+            ));
+        }
+        let misses = self.ports.misses.swap(0, Ordering::Relaxed);
+        if !lines.is_empty() && misses > 0 {
+            lines.push(format!(
+                "limits: {misses} packets passed unlimited (program not known yet)"
+            ));
+        }
+        lines
+    }
+
     /// Stop diverting. Queued packets are dropped; TCP retransmits them.
     pub fn shutdown(&self) {
         if let Some(d) = self.diverter.lock().unwrap().take() {
@@ -461,6 +509,7 @@ mod tests {
             b.release(now, &mut out);
         }
         sent += out.iter().map(|(p, _)| p.len()).sum::<usize>();
+        assert_eq!(b.sent, sent as u64, "the log reports what really went");
         assert!(
             (200_000..=212_000).contains(&sent),
             "sent {sent} bytes in 2 s"

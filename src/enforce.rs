@@ -325,6 +325,15 @@ impl Enforcer {
         }
     }
 
+    /// Log what the WinDivert limits let through over the last `secs` seconds.
+    pub fn report_limits(&self, secs: f64) {
+        if let Some(shaper) = &self.shaper {
+            for line in shaper.report(secs) {
+                self.state.log(line);
+            }
+        }
+    }
+
     /// Remove what does not clean itself up. WFP filters vanish with the
     /// process; QoS ActiveStore policies would otherwise last until reboot.
     pub fn shutdown(&self) {
