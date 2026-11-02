@@ -27,7 +27,7 @@ $inc = "$kits\Include\$ver"
 $lib = "$kits\Lib\$ver\km\x64"
 Write-Host "Windows Kit $ver"
 
-$defs = '/D_AMD64_ /D_WIN64 /DAMD64 /DNTDDI_VERSION=0x0A000008 /D_WIN32_WINNT=0x0A00 ' +
+$defs = '/D_AMD64_ /D_WIN64 /DAMD64 /DNTDDI_VERSION=0x0A000000 /D_WIN32_WINNT=0x0A00 ' +
         '/DWINVER=0x0A00 /DNDIS_SUPPORT_NDIS6=1 /DNDIS630=1 /DPOOL_NX_OPTIN=1'
 $cflags = "/nologo /c /kernel /Zi /W4 /WX /GS /Gy /Gw /O2 /analyze /analyze:WX- $defs " +
           "/I`"$inc\km`" /I`"$inc\km\crt`" /I`"$inc\shared`" /Fo`"$out\\`" /Fd`"$out\netleashlim.pdb`""

@@ -163,9 +163,13 @@ static void NTAPI FlowClassify(const FWPS_INCOMING_VALUES0 *in, const FWPS_INCOM
         return;
     }
 
-    f = (NL_FLOW *)ExAllocatePool2(POOL_FLAG_NON_PAGED, sizeof(NL_FLOW), TAG);
+    /* ExAllocatePool2 would be the modern call, but it only exists from
+     * Windows 10 2004 on and the driver must load on any Windows 10. */
+#pragma warning(suppress: 4996)
+    f = (NL_FLOW *)ExAllocatePoolWithTag(NonPagedPoolNx, sizeof(NL_FLOW), TAG);
     if (f == NULL)
         return; /* this flow simply goes unlimited */
+    RtlZeroMemory(f, sizeof(NL_FLOW));
     f->flowId = meta->flowHandle;
     f->layerId = layerId;
     f->calloutId = calloutId;
