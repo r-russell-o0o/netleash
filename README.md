@@ -141,9 +141,13 @@ contains no WinDivert files, so there's nothing in it for Defender to flag.
   same direction; a Block rule whose remote address is the "Internet" keyword
   becomes an internet-only block, and a TCP + UDP pair of otherwise identical
   rules (what Windows' "allow access?" prompt creates) counts as any protocol.
-  Listed with the reason instead: Allow rules, disabled rules, rules without a
-  program, and rules only for certain protocols, ports, addresses, services,
-  users, interfaces or network profiles (Domain/Private/Public), and Store apps.
+  A Block rule limited to some network types (Domain, Private or Public: Windows'
+  prompt usually creates them for Public only) becomes a block on **every**
+  network, because NetLeash has no network types; the preview lists these
+  rules, and a program can be loosened afterwards with *Allow* or *Block
+  internet*. Listed with the reason instead: Allow rules (NetLeash allows by
+  default), disabled rules, rules without a program, rules only for certain
+  protocols, ports, addresses, services, users or interfaces, and Store apps.
 - **Import from… simplewall** reads simplewall's `profile.xml` (found in each
   user's `%APPDATA%\Henry++\simplewall`, or give the path of a portable copy).
   simplewall blocks every program it doesn't allow; NetLeash allows by default,
@@ -240,7 +244,8 @@ Not yet verified on a real installation:
 - **simplewall import** against a profile saved by simplewall itself. The
   parser follows simplewall's source (3.x, profile version 3 to 6) and is tested
   with sample data; the Windows Firewall import has been previewed against a
-  real rule store, but not yet applied.
+  real rule store (1,565 rules: 18 programs imported, 19 of their rules
+  network-type limited), but not yet applied.
 
 Reports from other PCs are welcome. Please open an issue.
 

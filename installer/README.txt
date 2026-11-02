@@ -37,7 +37,15 @@ DOWNLOAD LIMITS NEED ONE MANUAL STEP: A DEFENDER EXCLUSION
 USE
   Double-click the NetLeash icon on the desktop (also in the Start menu),
   or open http://127.0.0.1:5199/ in any browser.
-  "Import from NetLimiter..." copies NetLimiter 5 block rules, if installed.
+  "Import from NetLimiter..." copies NetLimiter 5 block rules and limits, if
+  installed. "Import from..." does the same for Windows Firewall block rules
+  and simplewall's blocked programs. Each shows a preview first. Windows
+  Firewall rules meant for some network types only (e.g. Public) block on
+  every network in NetLeash; the preview lists them.
+  Click a program's row for its connections, a schedule (block or limit only
+  at certain times) and a data allowance per day or month.
+  New programs that use the network show up above the list and in the tray
+  icon; choose "Block them until I allow them" to be stricter.
 
 FILES
   Program:   C:\Program Files\NetLeash
