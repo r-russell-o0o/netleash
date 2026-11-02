@@ -263,10 +263,14 @@ WFP session, and closing the device handle lifts every limit.
 - Build: `driver\build.ps1` (Build Tools 2022 + Windows Driver Kit; runs `/analyze`
   and the token-bucket tests). Use it with `netleash --limiter driver`.
 - Test: `driver\make-vmkit.ps1` makes a test-signed kit for a **test VM**
-  (`driver\vmtest\README.txt`). It has not been loaded on a real system yet.
+  (`driver\vmtest\README.txt`). First result (Windows 10 1607 VM): a
+  200 KB/s limit held at 201 KB/s, removing it or killing NetLeash restored
+  full speed (about 10 MB/s), and the driver unloaded cleanly. Not yet tested
+  on Windows 11 with memory integrity, or under Driver Verifier.
 - Shipping it needs Microsoft's attestation signing: a registered business,
   an EV code signing certificate and a Hardware Dev Center account. Until
   then WinDivert stays the default.
+
 ## Building from source
 
 Requires Rust (<https://rustup.rs>). `rust-toolchain.toml` pins the GNU toolchain,
