@@ -54,6 +54,16 @@ pub fn local_date() -> String {
     format!("{:04}-{:02}-{:02}", t.wYear, t.wMonth, t.wDay)
 }
 
+/// Local weekday and time, for schedules and quotas.
+pub fn local_now() -> crate::timed::Now {
+    let t = local_time();
+    crate::timed::Now {
+        weekday: ((t.wDayOfWeek + 6) % 7) as u8, // Windows: 0 = Sunday
+        minute: t.wHour * 60 + t.wMinute,
+        today: format!("{:04}-{:02}-{:02}", t.wYear, t.wMonth, t.wDay),
+    }
+}
+
 pub fn local_time_hms() -> String {
     let t = local_time();
     format!("{:02}:{:02}:{:02}", t.wHour, t.wMinute, t.wSecond)

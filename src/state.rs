@@ -44,6 +44,12 @@ pub struct Rule {
     /// Download limit in bytes per second (needs WinDivert).
     #[serde(default)]
     pub down_limit: Option<u64>,
+    /// When the blocks and limits above apply (default: always).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub schedule: Option<crate::timed::Schedule>,
+    /// Daily or monthly data allowance.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quota: Option<crate::timed::Quota>,
 }
 
 impl Rule {
@@ -67,7 +73,10 @@ impl Rule {
     }
 
     pub fn is_noop(&self) -> bool {
-        !self.blocks_any() && self.up_limit.is_none() && self.down_limit.is_none()
+        !self.blocks_any()
+            && self.up_limit.is_none()
+            && self.down_limit.is_none()
+            && self.quota.is_none()
     }
 }
 
@@ -110,6 +119,10 @@ pub struct AppView {
     pub rule: Option<Rule>,
     /// The program's own description ("Google Chrome"), filled in by the web layer.
     pub description: Option<String>,
+    /// Set when a schedule or quota changes what the rule does right now.
+    pub timed: Option<crate::timed::Timed>,
+    /// Bytes used in the current quota period, if the rule has a quota.
+    pub quota_used: Option<u64>,
 }
 
 #[derive(Serialize)]
@@ -272,6 +285,8 @@ impl State {
                     history: a.history.iter().copied().collect(),
                     rule: g.rules.get(key).cloned(),
                     description: None,
+                    timed: None,
+                    quota_used: None,
                 }
             })
             .collect();
@@ -351,6 +366,17 @@ impl State {
             }
         }
         seen.into_values().collect()
+    }
+
+    /// Bytes (up + down) the program used from day `since` (`YYYY-MM-DD`) on.
+    pub fn used_since(&self, key: &str, since: &str) -> u64 {
+        let g = self.inner.lock().unwrap();
+        g.usage
+            .range(since.to_string()..)
+            .flat_map(|(_, programs)| programs.iter())
+            .filter(|(path, _)| app_key(path) == key)
+            .map(|(_, [up, down])| up + down)
+            .sum()
     }
 
     pub fn usage_json(&self) -> String {

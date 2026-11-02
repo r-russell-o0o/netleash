@@ -30,6 +30,7 @@ driver when it's installed.
 | **Find programs**: every program that uses the network, by name, without knowing its path | usage history + open sockets + Windows Firewall rules (`src/catalog.rs`) |
 | Import NetLimiter 5 rules | read-only importer with a preview (`src/nlimport.rs`) |
 | **New-program alerts**: notified when a program uses the network for the first time; strict mode blocks it until you allow it | `src/watch.rs` |
+| **Schedules** (a block or limit only at certain times) and **data quotas** (per day or month, then block or slow down) | `src/timed.rs` |
 | Tray icon with live speed and notifications | `netleash-tray.exe` (`src/bin/netleash-tray.rs`), started at each user's logon |
 | Wildcard paths, e.g. for Store apps whose folder changes with each update | `src/pathglob.rs` |
 | Daily usage history (120 days) | `src/state.rs` |
@@ -107,6 +108,14 @@ contains no WinDivert files, so there's nothing in it for Defender to flag.
   172.16-31.x, 192.168.x, link-local, loopback, multicast; fc00::/7, fe80::/10).
   A local network that uses public addresses counts as internet.
 - **Limits** are in KB/s (1 KB = 1024 bytes) for upload (↑) and download (↓).
+- **Schedules and quotas**: click a program's row. *Only apply the block and
+  limits on* chosen days and times (a range past midnight, such as 22:00 to
+  07:00, runs into the next morning). A *data allowance* counts upload +
+  download per day or per calendar month, then blocks the program or slows it
+  to a set speed until the next day or month. The row shows the state (*resting
+  now*, *2.1 GB of 5 GB per month*, *blocked*). **Limitations:** checked every
+  10 seconds, so a quota can overshoot by that much traffic; times are the PC's
+  local time. Demo mode shows the states but doesn't simulate them in its traffic.
 - **Find programs…** lists every program with evidence of network use, by its
   real name ("Google Chrome · Google LLC") and why it's listed: running now,
   used recently, or named in a Windows Firewall rule. Block or limit it right

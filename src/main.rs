@@ -14,6 +14,7 @@ mod qos;
 mod shaper;
 mod state;
 mod sys;
+mod timed;
 mod watch;
 mod web;
 mod wfp;
@@ -218,6 +219,8 @@ fn main() {
                 if n.is_multiple_of(60) {
                     st.flush_usage();
                     en.refresh();
+                } else if n.is_multiple_of(10) {
+                    en.check(false);
                 }
             }
         });

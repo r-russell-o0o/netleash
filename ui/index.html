@@ -90,6 +90,9 @@
   .np-name { flex: 1; min-width: 0; }
   .np-name small { display: block; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .tag.bad { color: var(--bad); border-color: var(--bad); }
+  .timed { display: grid; gap: 6px; margin: 4px 0 10px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; }
+  .timed label.day { margin-left: 6px; }
+  .timed input[type=time] { width: 96px; }
   button.act.danger { border-color: var(--bad); color: var(--bad); }
   #picker { width: min(1180px, calc(100vw - 32px)); }
   #picker td.name small { max-width: 420px; }
@@ -376,6 +379,7 @@ function updateRow(r, a) {
   }
   if (/[*?]/.test(a.path)) title.append(el("span", { class: "tag", title: "Wildcard rule: applies to every matching file, re-checked each minute" }, "pattern"));
   else if (!running) title.append(el("span", { class: "tag" }, "not active"));
+  title.append(...timedTags(a));
   r.name.replaceChildren(title, el("small", { title: a.path }, a.path + (running ? `  ·  PID ${a.pids.join(", ")}` : "")));
   const vals = [fmtRate(a.down_rate), fmtRate(a.up_rate), fmtBytes(a.down_total), fmtBytes(a.up_total)];
   r.cells.forEach((c, i) => (c.textContent = vals[i]));
@@ -399,13 +403,84 @@ async function toggleDetail(key) {
 
 async function loadDetail(r) {
   const td = r.detail.firstChild;
+  const editor = r.app.path.includes("\\") ? timedEditor(r) : "";
   try {
     const conns = await api("/api/connections?app=" + encodeURIComponent(r.app.key));
-    if (!conns.length) { td.replaceChildren(el("span", { class: "muted" }, "No open connections.")); return; }
+    if (!conns.length) { td.replaceChildren(editor, el("span", { class: "muted" }, "No open connections.")); return; }
     const t = el("table", {}, el("tr", {}, ...["Proto", "Local", "Remote", "State", "PID"].map((h) => el("th", {}, h))));
     for (const c of conns) t.append(el("tr", {}, ...[c.proto, c.local, c.remote, c.state, String(c.pid)].map((v) => el("td", {}, v))));
-    td.replaceChildren(t);
-  } catch (e) { td.textContent = e.message; }
+    td.replaceChildren(editor, t);
+  } catch (e) { td.replaceChildren(editor, e.message); }
+}
+
+// ---- schedules & quotas ---------------------------------------------------------
+const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+const hhmm = (m) => String(Math.floor(m / 60)).padStart(2, "0") + ":" + String(m % 60).padStart(2, "0");
+const toMin = (s) => { const [h, m] = (s || "0:0").split(":").map(Number); return h * 60 + m; };
+function dayText(bits) {
+  if (bits === 127) return "every day";
+  if (bits === 31) return "Mon–Fri";
+  if (bits === 96) return "Sat–Sun";
+  return DAYS.filter((_, i) => bits & (1 << i)).join(", ");
+}
+function timedTags(a) {
+  const r = a.rule, out = [];
+  if (!r) return out;
+  if (r.schedule) {
+    const s = r.schedule, when = s.start === s.end ? "all day" : `${hhmm(s.start)}–${hhmm(s.end)}`;
+    out.push(el("span", { class: "tag", title: "The blocks and limits apply only at these times" },
+      `${dayText(s.days)} ${when}` + (a.timed === "resting" ? " · resting now" : " · active now")));
+  }
+  if (r.quota) {
+    const q = r.quota, used = a.quota_used || 0, over = a.timed === "over_quota";
+    out.push(el("span", { class: "tag" + (over ? " bad" : ""), title: "Data allowance, upload + download" },
+      `${fmtBytes(used)} of ${fmtBytes(q.bytes)} per ${q.period}` + (over ? (q.action === "limit" ? " · slowed" : " · blocked") : "")));
+  }
+  return out;
+}
+function timedEditor(row) {
+  const rule = row.app.rule || {}, s = rule.schedule, q = rule.quota;
+  const box = el("div", { class: "timed" });
+  box.addEventListener("click", (e) => e.stopPropagation());
+  const sOn = el("input", { type: "checkbox" }); sOn.checked = !!s;
+  const dayBoxes = DAYS.map((d, i) => { const c = el("input", { type: "checkbox" }); c.checked = s ? !!(s.days & (1 << i)) : true; return [d, c]; });
+  const from = el("input", { type: "time", value: hhmm(s ? s.start : 22 * 60) });
+  const to = el("input", { type: "time", value: hhmm(s ? s.end : 7 * 60) });
+  const qOn = el("input", { type: "checkbox" }); qOn.checked = !!q;
+  const GB = 1024 ** 3, MB = 1024 ** 2;
+  const unitBig = q ? q.bytes >= GB && q.bytes % GB === 0 : true;
+  const amount = el("input", { type: "number", min: "1", step: "1", style: "width:80px", value: q ? Math.round(q.bytes / (unitBig ? GB : MB)) : 5 });
+  const unit = el("select", {}, el("option", { value: MB }, "MB"), el("option", { value: GB }, "GB")); unit.value = unitBig ? GB : MB;
+  const period = el("select", {}, el("option", { value: "day" }, "per day"), el("option", { value: "month" }, "per month")); period.value = q ? q.period : "day";
+  const action = el("select", {}, el("option", { value: "block" }, "then block it"), el("option", { value: "limit" }, "then slow it to")); action.value = q ? q.action : "block";
+  const rate = el("input", { type: "number", min: "1", step: "1", style: "width:80px", value: q && q.rate ? Math.round(q.rate / 1024) : 50 });
+  const rateLabel = el("label", { class: "muted" }, rate, " KB/s");
+  const sync = () => { rateLabel.hidden = action.value !== "limit"; };
+  action.addEventListener("change", sync); sync();
+  const save = el("button", { class: "act" }, "Save");
+  save.addEventListener("click", async () => {
+    const days = dayBoxes.reduce((b, [, c], i) => b | (c.checked ? 1 << i : 0), 0);
+    if (sOn.checked && !days) { alert("Pick at least one day."); return; }
+    const cur = row.app.rule;
+    if (sOn.checked && !(cur && (cur.block_in || cur.block_out || cur.up_limit || cur.down_limit))) {
+      alert("A schedule decides when this program's block or limits apply. Set a block or a limit first."); return;
+    }
+    const patch = {
+      schedule: sOn.checked ? { days, start: toMin(from.value), end: toMin(to.value) } : null,
+      quota: qOn.checked ? { bytes: Math.max(1, Math.round(+amount.value * +unit.value)), period: period.value,
+        action: action.value, rate: action.value === "limit" ? Math.max(1, Math.round(+rate.value * 1024)) : null } : null,
+    };
+    await saveRule(row.app, patch);
+  });
+  box.append(
+    el("div", {}, el("label", {}, sOn, " Only apply the block and limits on "),
+      ...dayBoxes.map(([d, c]) => el("label", { class: "day" }, c, d)),
+      " from ", from, " to ", to,
+      el("span", { class: "muted" }, "  (a time range past midnight runs into the next day; the same time twice = all day)")),
+    el("div", {}, el("label", {}, qOn, " Data allowance: "), amount, unit, period, action, rateLabel,
+      el("span", { class: "muted" }, "  (upload + download, counted from the usage history)")),
+    el("div", {}, save));
+  return box;
 }
 
 // ---- sorting & view (remembered per browser) ---------------------------------

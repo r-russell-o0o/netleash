@@ -6,6 +6,7 @@
 use crate::shaper::Shaper;
 use crate::state::{Dir, Rule, State, app_key};
 use crate::sys::ProcessNames;
+use crate::timed::Timed;
 use crate::wfp::Way;
 use crate::{conns, pathglob, qos, wfp};
 use std::collections::{HashMap, HashSet};
@@ -20,6 +21,11 @@ pub struct Enforcer {
     failing: Mutex<HashSet<wfp::BlockKey>>,
     /// Wildcard patterns that matched nothing last time (logged once).
     unmatched: Mutex<HashSet<String>>,
+    /// Rules with wildcards expanded, before schedules and quotas.
+    concrete: Mutex<Vec<Rule>>,
+    /// What was last put into effect, and why rules differ from their settings.
+    applied: Mutex<Vec<Rule>>,
+    timed: Mutex<HashMap<String, Timed>>,
 }
 
 impl Enforcer {
@@ -37,6 +43,9 @@ impl Enforcer {
                 qos_ok: false,
                 failing: Mutex::new(HashSet::new()),
                 unmatched: Mutex::new(HashSet::new()),
+                concrete: Mutex::new(Vec::new()),
+                applied: Mutex::new(Vec::new()),
+                timed: Mutex::new(HashMap::new()),
             };
         }
         let blocker = match wfp::Blocker::open() {
@@ -80,6 +89,9 @@ impl Enforcer {
             qos_ok,
             failing: Mutex::new(HashSet::new()),
             unmatched: Mutex::new(HashSet::new()),
+            concrete: Mutex::new(Vec::new()),
+            applied: Mutex::new(Vec::new()),
+            timed: Mutex::new(HashMap::new()),
         }
     }
 
@@ -110,30 +122,74 @@ impl Enforcer {
 
     /// Bring OS state in line with the current rules.
     pub fn apply(&self) {
-        if self.state.demo {
-            return;
-        }
-        let rules = self.concrete_rules();
-        self.apply_blocks(&rules);
-        self.apply_limits(&rules, true);
+        *self.concrete.lock().unwrap() = self.concrete_rules();
+        self.check(true);
     }
 
     /// Re-expand wildcard rules (called every minute), so a program update
     /// that changes the version folder is covered without user action.
-    /// Leaves QoS alone: that runs PowerShell and has no wildcards to refresh.
     pub fn refresh(&self) {
-        if self.state.demo
-            || !self
-                .state
-                .rules()
-                .iter()
-                .any(|r| pathglob::has_wildcard(&r.path))
+        if self
+            .state
+            .rules()
+            .iter()
+            .any(|r| pathglob::has_wildcard(&r.path))
         {
+            *self.concrete.lock().unwrap() = self.concrete_rules();
+        }
+        self.check(false);
+    }
+
+    /// Apply schedules and quotas (called every 10 seconds); touches the OS
+    /// only when the result changed, or always with `force`.
+    pub fn check(&self, force: bool) {
+        let now = crate::sys::local_now();
+        let mut timed = HashMap::new();
+        let rules: Vec<Rule> = self
+            .concrete
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|r| {
+                let key = app_key(&r.path);
+                let (eff, why) =
+                    crate::timed::effective(r, &now, |since| self.state.used_since(&key, since));
+                if let Some(w) = why {
+                    timed.insert(key, w);
+                }
+                eff
+            })
+            .collect();
+        {
+            let mut before = self.timed.lock().unwrap();
+            for (key, w) in &timed {
+                if before.get(key) != Some(w) {
+                    let name = crate::state::file_name(key);
+                    self.state.log(match w {
+                        Timed::Resting => format!("{name}: outside its schedule, rule resting"),
+                        Timed::OverQuota => format!("{name}: data quota used up"),
+                    });
+                }
+            }
+            for key in before.keys().filter(|k| !timed.contains_key(*k)) {
+                let name = crate::state::file_name(key);
+                self.state
+                    .log(format!("{name}: rule back to its normal settings"));
+            }
+            *before = timed;
+        }
+        let mut applied = self.applied.lock().unwrap();
+        if self.state.demo || (!force && *applied == rules) {
             return;
         }
-        let rules = self.concrete_rules();
         self.apply_blocks(&rules);
-        self.apply_limits(&rules, false);
+        self.apply_limits(&rules, true);
+        *applied = rules;
+    }
+
+    /// Why a program's rule acts differently from its settings right now.
+    pub fn timed(&self) -> HashMap<String, Timed> {
+        self.timed.lock().unwrap().clone()
     }
 
     fn apply_blocks(&self, rules: &[Rule]) {

@@ -123,8 +123,14 @@ fn handle(req: &mut Request, state: &State, enforcer: &Enforcer, watch: &Watch) 
         (Method::Get, "/") => reply(200, "text/html; charset=utf-8", INDEX),
         (Method::Get, "/api/state") => {
             let mut snap = state.snapshot();
+            let timed = enforcer.timed();
+            let now = crate::sys::local_now();
             for a in &mut snap.apps {
                 a.description = catalog::ver_info(&a.path).description;
+                a.timed = timed.get(&a.key).cloned();
+                if let Some(q) = a.rule.as_ref().and_then(|r| r.quota.as_ref()) {
+                    a.quota_used = Some(state.used_since(&a.key, &now.period_start(q.period)));
+                }
             }
             json(serde_json::to_string(&snap).unwrap())
         }
