@@ -58,6 +58,8 @@ try {
     New-Item -ItemType Directory -Force $InstallDir | Out-Null
     foreach ($f in 'netleash.exe', 'netleash-tray.exe', 'netleash.ico', 'uninstall.ps1', 'README.txt', 'VERSION') {
         $p = Join-Path $src $f
+        # In the package README.txt sits one level up, next to the installer.
+        if (-not (Test-Path $p)) { $p = Join-Path (Split-Path $src) $f }
         if (Test-Path $p) { Copy-Item $p $InstallDir -Force }
     }
 

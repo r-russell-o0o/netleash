@@ -79,15 +79,20 @@ $adminManifest = @'
   </trustInfo>
 </assembly>
 '@
+# Only the installer and README.txt sit at the top of the zip, so buyers see
+# at once what to open; everything else goes in files\.
 $ico = Join-Path $root 'installer\netleash.ico'
 $bin = Join-Path $root 'target\pkg\release'
-Copy-Item (Join-Path $bin 'netleash.exe'), (Join-Path $bin 'netleash-tray.exe') $out
+$files = Join-Path $out 'files'
+New-Item -ItemType Directory -Force $files | Out-Null
+Copy-Item (Join-Path $bin 'netleash.exe'), (Join-Path $bin 'netleash-tray.exe') $files
 Copy-Item (Join-Path $bin 'netleash-setup.exe') (Join-Path $out 'Install NetLeash.exe')
-[ExeResources]::Set((Join-Path $out 'netleash.exe'), $ico, $null)
-[ExeResources]::Set((Join-Path $out 'netleash-tray.exe'), $ico, $null)
+[ExeResources]::Set((Join-Path $files 'netleash.exe'), $ico, $null)
+[ExeResources]::Set((Join-Path $files 'netleash-tray.exe'), $ico, $null)
 [ExeResources]::Set((Join-Path $out 'Install NetLeash.exe'), $ico, $adminManifest)
-Copy-Item (Join-Path $root 'installer\*') $out
-Set-Content (Join-Path $out 'VERSION') "$version ($commit)"
+Copy-Item (Join-Path $root 'installer\README.txt') $out
+Copy-Item (Join-Path $root 'installer\*') $files -Exclude 'README.txt'
+Set-Content (Join-Path $files 'VERSION') "$version ($commit)"
 
 Compress-Archive -Path (Join-Path $out '*') -DestinationPath "$out.zip"
 $hash = (Get-FileHash "$out.zip" -Algorithm SHA256).Hash
