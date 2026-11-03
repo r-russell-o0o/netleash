@@ -39,6 +39,19 @@ if (-not $admin) {
 }
 
 function Step($text) { Write-Host "`n== $text" -ForegroundColor Cyan }
+
+# Copy one file into $dir. A file still in use (Explorer reading an exe's
+# icon, a virus scan, a process slow to exit) can't be overwritten, but it can
+# be renamed: after a few tries the old copy is moved aside, and the next
+# install deletes it.
+function Install-File($from, $dir) {
+    $to = Join-Path $dir (Split-Path $from -Leaf)
+    for ($i = 0; $i -lt 10; $i++) {
+        try { Copy-Item $from $to -Force; return } catch { Start-Sleep -Milliseconds 500 }
+    }
+    Rename-Item $to "$(Split-Path $to -Leaf).old-$(Get-Date -Format yyyyMMddHHmmss)"
+    Copy-Item $from $to -Force
+}
 $src = $PSScriptRoot
 if (-not (Test-Path (Join-Path $src 'netleash.exe'))) { throw "netleash.exe not found next to install.ps1" }
 $version = (Get-Item (Join-Path $src 'netleash.exe')).VersionInfo.ProductVersion
@@ -50,17 +63,19 @@ try {
     if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
         Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
     }
-    Get-Process netleash, netleash-tray -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
-    Start-Sleep -Seconds 2
+    $running = Get-Process netleash, netleash-tray -ErrorAction SilentlyContinue
+    $running | Stop-Process -Force -ErrorAction SilentlyContinue
+    $running | Wait-Process -Timeout 10 -ErrorAction SilentlyContinue
 
     # --- files -----------------------------------------------------------------------
     Step "Copying files to $InstallDir"
     New-Item -ItemType Directory -Force $InstallDir | Out-Null
+    Remove-Item (Join-Path $InstallDir '*.old-*') -Force -ErrorAction SilentlyContinue
     foreach ($f in 'netleash.exe', 'netleash-tray.exe', 'netleash.ico', 'uninstall.ps1', 'README.txt', 'VERSION') {
         $p = Join-Path $src $f
         # In the package README.txt sits one level up, next to the installer.
         if (-not (Test-Path $p)) { $p = Join-Path (Split-Path $src) $f }
-        if (Test-Path $p) { Copy-Item $p $InstallDir -Force }
+        if (Test-Path $p) { Install-File $p $InstallDir }
     }
 
     # Rules decide what gets blocked, so only Administrators/SYSTEM may change them.
@@ -213,5 +228,12 @@ not change Defender settings for you.
     }
 } catch {
     Write-Host "`nInstall failed: $_" -ForegroundColor Red
+    # Never leave the PC without NetLeash: start whatever is installed again.
+    if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
+        Start-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+        $tray = Join-Path $InstallDir 'netleash-tray.exe'
+        if (Test-Path $tray) { Start-Process explorer.exe -ArgumentList "`"$tray`"" -ErrorAction SilentlyContinue }
+        Write-Host 'NetLeash was started again with the files already in place. Run the installer again to finish the update.'
+    }
 }
 if ($Host.Name -eq 'ConsoleHost') { Read-Host "`nPress Enter to close" | Out-Null }
