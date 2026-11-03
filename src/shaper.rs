@@ -98,10 +98,14 @@ impl Bucket {
         self.tokens = self.tokens.min(self.burst);
     }
 
+    /// An idle bucket saves up at most one burst. While packets wait, budget
+    /// is saved up to what they need too: when the pacing thread wakes late
+    /// (a busy PC, a VM), the time it missed is made up, not lost.
     fn refill(&mut self, now: Instant) {
         let dt = now.duration_since(self.last).as_secs_f64();
         self.last = now;
-        self.tokens = (self.tokens + dt * self.rate).min(self.burst);
+        let cap = self.burst + self.queued_bytes as f64;
+        self.tokens = (self.tokens + dt * self.rate).min(cap);
     }
 
     /// A packet may go when enough tokens are saved up. Packets larger than
@@ -256,6 +260,18 @@ pub struct Shaper {
     buckets: Buckets,
     diverter: Mutex<Option<Diverter>>,
     _flow: Arc<Handle>,
+    /// Longest time the pacing thread went without running, in ms, since the last report.
+    pace_gap_ms: Arc<AtomicU64>,
+    last_report: Mutex<Instant>,
+}
+
+/// The packet threads decide how fast limited apps get their data, so they
+/// must not wait behind the busy programs they are limiting.
+fn raise_priority() {
+    use windows_sys::Win32::System::Threading::{
+        GetCurrentThread, SetThreadPriority, THREAD_PRIORITY_HIGHEST,
+    };
+    unsafe { SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST) };
 }
 
 impl Shaper {
@@ -302,6 +318,8 @@ impl Shaper {
             buckets: Arc::new(Mutex::new(HashMap::new())),
             diverter: Mutex::new(None),
             _flow: flow,
+            pace_gap_ms: Arc::new(AtomicU64::new(0)),
+            last_report: Mutex::new(Instant::now()),
         })
     }
 
@@ -361,6 +379,7 @@ impl Shaper {
             std::thread::Builder::new()
                 .name("windivert-recv".into())
                 .spawn(move || {
+                    raise_priority();
                     let mut buf = vec![0u8; wd::MTU_MAX];
                     let mut addr = Address::zeroed();
                     while let Some(n) = h.recv(&mut buf, &mut addr) {
@@ -381,15 +400,24 @@ impl Shaper {
         );
 
         // Release queued packets as budget becomes available.
-        let (h, buckets, stop_flag) = (handle.clone(), self.buckets.clone(), stop.clone());
+        let (h, buckets, stop_flag, gap) = (
+            handle.clone(),
+            self.buckets.clone(),
+            stop.clone(),
+            self.pace_gap_ms.clone(),
+        );
         threads.push(
             std::thread::Builder::new()
                 .name("windivert-pace".into())
                 .spawn(move || {
+                    raise_priority();
                     let mut out = Vec::new();
+                    let mut last = Instant::now();
                     while !stop_flag.load(Ordering::Relaxed) {
                         std::thread::sleep(TICK);
                         let now = Instant::now();
+                        gap.fetch_max(now.duration_since(last).as_millis() as u64, Ordering::Relaxed);
+                        last = now;
                         for bucket in buckets.lock().unwrap().values_mut() {
                             bucket.release(now, &mut out);
                         }
@@ -407,9 +435,17 @@ impl Shaper {
         })
     }
 
-    /// One log line per limit that saw traffic in the last `secs` seconds:
-    /// the rate actually let through against the limit, and what was dropped.
-    pub fn report(&self, secs: f64) -> Vec<String> {
+    /// One log line per limit that saw traffic since the last report: the rate
+    /// actually let through against the limit, and what was dropped.
+    pub fn report(&self) -> Vec<String> {
+        let secs = {
+            let mut last = self.last_report.lock().unwrap();
+            let now = Instant::now();
+            let secs = now.duration_since(*last).as_secs_f64().max(0.001);
+            *last = now;
+            secs
+        };
+        let gap = self.pace_gap_ms.swap(0, Ordering::Relaxed);
         let mut lines = Vec::new();
         for ((key, dir), b) in self.buckets.lock().unwrap().iter_mut() {
             let (sent, dropped) = (std::mem::take(&mut b.sent), std::mem::take(&mut b.dropped));
@@ -417,7 +453,7 @@ impl Shaper {
                 continue;
             }
             lines.push(format!(
-                "limit {} {}: {:.0} KB/s let through (limit {:.0}), {} KB dropped",
+                "limit {} {}: {:.0} KB/s let through over {secs:.0} s (limit {:.0}), {} KB dropped",
                 crate::state::file_name(key),
                 if *dir == Dir::Up { "up" } else { "down" },
                 sent as f64 / secs / 1024.0,
@@ -426,9 +462,10 @@ impl Shaper {
             ));
         }
         let misses = self.ports.misses.swap(0, Ordering::Relaxed);
-        if !lines.is_empty() && misses > 0 {
+        if !lines.is_empty() {
             lines.push(format!(
-                "limits: {misses} packets passed unlimited (program not known yet)"
+                "limits: {misses} packets passed unlimited (program not known yet); \
+                 pacing thread's longest pause {gap} ms"
             ));
         }
         lines
@@ -488,8 +525,12 @@ mod tests {
         let mut out = Vec::new();
         b.release(t0 + Duration::from_millis(50), &mut out); // +1500 B of budget
         assert_eq!(out.len(), 1);
-        b.release(t0 + Duration::from_secs(1), &mut out); // burst-capped refill
-        assert_eq!(out.len(), 3);
+        // A pacer that wakes late still gets the budget of the time it missed.
+        b.release(t0 + Duration::from_secs(1), &mut out);
+        assert_eq!(out.len(), 20);
+        // An idle bucket saves up only one burst.
+        b.release(t0 + Duration::from_secs(60), &mut out);
+        assert!(b.tokens <= 3000.0);
     }
 
     #[test]

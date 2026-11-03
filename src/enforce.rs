@@ -325,10 +325,10 @@ impl Enforcer {
         }
     }
 
-    /// Log what the WinDivert limits let through over the last `secs` seconds.
-    pub fn report_limits(&self, secs: f64) {
+    /// Log what the WinDivert limits let through since the last report.
+    pub fn report_limits(&self) {
         if let Some(shaper) = &self.shaper {
-            for line in shaper.report(secs) {
+            for line in shaper.report() {
                 self.state.log(line);
             }
         }

@@ -231,7 +231,7 @@ fn main() {
                 watch::process(&wt, &st, &en);
                 n += 1;
                 if n.is_multiple_of(10) {
-                    en.report_limits(10.0);
+                    en.report_limits();
                 }
                 if n.is_multiple_of(60) {
                     st.flush_usage();
