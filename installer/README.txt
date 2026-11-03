@@ -2,7 +2,7 @@ NetLeash - per-program network monitor, firewall and bandwidth limiter
 =====================================================================
 
 INSTALL
-  1. Double-click Install.cmd and approve the Administrator prompt.
+  1. Double-click Install NetLeash.exe and approve the Administrator prompt.
   2. Answer the WinDivert question (see below).
   NetLeash then starts automatically at every boot (before anyone logs in)
   and restarts itself within 5 minutes if it ever stops.
@@ -25,7 +25,7 @@ DOWNLOAD LIMITS NEED ONE MANUAL STEP: A DEFENDER EXCLUSION
 
   It worked if the installer prints "WinDivert installed". In the UI,
   the "Download limits" chip turns green.
-  Skipped it? Add the exclusion and run Install.cmd again at any time.
+  Skipped it? Add the exclusion and run Install NetLeash.exe again at any time.
   Your rules are kept.
 
   Options (run install.ps1 from an Administrator PowerShell):

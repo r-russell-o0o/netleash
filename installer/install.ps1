@@ -1,4 +1,4 @@
-# NetLeash installer. Run from the unpacked package (Install.cmd does this).
+# NetLeash installer. Run from the unpacked package (Install NetLeash.exe does this).
 #
 #  - copies netleash.exe to Program Files
 #  - optionally installs the WinDivert driver (needed for bandwidth limits)
@@ -148,7 +148,7 @@ not change Defender settings for you.
             }
         }
         if (-not (Test-Path (Join-Path $wd 'WinDivert64.sys'))) {
-            Write-Host 'Continuing without WinDivert. Run Install.cmd again at any time to add it.'
+            Write-Host 'Continuing without WinDivert. Run Install NetLeash.exe again at any time to add it.'
         }
     }
 

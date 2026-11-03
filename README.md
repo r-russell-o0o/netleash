@@ -41,7 +41,7 @@ driver when it's installed.
 
 1. Download `NetLeash-<version>.zip` from the
    [Releases](https://github.com/r-russell-o0o/netleash/releases) page and unzip it.
-2. Double-click **`Install.cmd`** and approve the Administrator prompt.
+2. Double-click **`Install NetLeash.exe`** and approve the Administrator prompt.
 3. Answer the WinDivert question. See the next section first if you want bandwidth limits.
 4. Open NetLeash from the **NetLeash** icon on the desktop or in the Start menu,
    or go to <http://127.0.0.1:5199/> in any browser.
@@ -76,7 +76,7 @@ uses it too.
 4. Choose **`C:\Program Files\NetLeash\windivert`**. The installer creates this
    folder, so it already exists when the installer asks.
 5. Back in the installer, answer **Y**, or **R** to retry after a blocked download.
-   If you've already finished installing, run `Install.cmd` again; your rules are kept.
+   If you've already finished installing, run `Install NetLeash.exe` again; your rules are kept.
 
 It worked when the installer prints `WinDivert installed`. In the UI, the
 **Download limits** chip turns green and the yellow "Download limits are off"
@@ -327,7 +327,8 @@ src/sys.rs        elevation, time, process paths, Ctrl+C
 src/web.rs        HTTP API and the embedded UI
 src/demo.rs       synthetic traffic for --demo
 ui/index.html     the UI
-installer/        install.ps1, uninstall.ps1, Install.cmd, README.txt
+installer/        install.ps1, uninstall.ps1, README.txt (the package's "Install NetLeash.exe"
+                  is src/bin/netleash-setup.rs)
 ```
 
 ## Roadmap
