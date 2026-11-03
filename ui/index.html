@@ -777,7 +777,7 @@ function chip(label, status) {
 function renderHeader(s) {
   $("down").textContent = fmtRate(s.down_rate);
   $("up").textContent = fmtRate(s.up_rate);
-  $("mode").textContent = s.demo ? "demo" : "";
+  $("mode").textContent = s.demo ? "demo" : s.version || "";
   $("demo-banner").classList.toggle("hidden", !s.demo);
   window.shaper = /^(ok|demo)/.test(s.status.shaper);
   $("wd-banner").classList.toggle("hidden", s.demo || window.shaper || recall("wdHidden", false));

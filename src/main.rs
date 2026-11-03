@@ -264,7 +264,8 @@ fn main() {
 
     let url = format!("http://127.0.0.1:{}/", args.port);
     state.log(format!(
-        "NetLeash {} — UI at {url} (data in {})",
+        "NetLeash {} {} — UI at {url} (data in {})",
+        env!("CARGO_PKG_VERSION"),
         if args.demo { "demo" } else { "running" },
         state.data_dir().display()
     ));

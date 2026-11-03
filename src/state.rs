@@ -127,6 +127,7 @@ pub struct AppView {
 
 #[derive(Serialize)]
 pub struct Snapshot {
+    pub version: &'static str,
     pub demo: bool,
     pub uptime_secs: u64,
     pub up_rate: u64,
@@ -297,6 +298,7 @@ impl State {
         });
         let (up_rate, down_rate) = g.totals_history.back().copied().unwrap_or((0, 0));
         Snapshot {
+            version: env!("CARGO_PKG_VERSION"),
             demo: self.demo,
             uptime_secs: self.started.elapsed().as_secs(),
             up_rate,
